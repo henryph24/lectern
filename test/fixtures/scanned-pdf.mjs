@@ -4,18 +4,29 @@ import { pdfWithImagePages } from './pdf-builder.mjs';
 // wraps it as a text-layer-free "scanned" PDF — i.e. extractText recovers
 // nothing, forcing the OCR fallback. Shared by the OCR live integration test and
 // the desktop e2e (which exercises the *packaged* canvas + tesseract binaries).
+const FONT = 'bold 56px sans-serif';
+const MARGIN = 40;
+const LINE_HEIGHT = 130;
+
 export async function makeScannedPdf(lines) {
   const { createCanvas } = await import('@napi-rs/canvas');
-  const W = 1100;
-  const H = 130 * lines.length + 60;
+  // Measure with the real font before sizing the bitmap. "sans-serif" resolves
+  // to a different face per platform (the Linux CI fallback is wider than the
+  // macOS one), so a fixed width clips the longest line on some machines and the
+  // OCR test then fails on text that was never drawn.
+  const measure = createCanvas(8, 8).getContext('2d');
+  measure.font = FONT;
+  const widest = Math.max(...lines.map((line) => measure.measureText(line).width));
+  const W = Math.ceil(widest) + MARGIN * 2;
+  const H = LINE_HEIGHT * lines.length + 60;
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = '#000000';
-  ctx.font = 'bold 56px sans-serif';
+  ctx.font = FONT;
   ctx.textBaseline = 'top';
-  lines.forEach((line, i) => ctx.fillText(line, 40, 30 + i * 130));
+  lines.forEach((line, i) => ctx.fillText(line, MARGIN, 30 + i * LINE_HEIGHT));
 
   const { data } = ctx.getImageData(0, 0, W, H); // RGBA
   const rgb = Buffer.alloc(W * H * 3);

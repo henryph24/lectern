@@ -1,6 +1,6 @@
 # Lectern
 
-[![CI](https://github.com/henryph24/speechify-clone/actions/workflows/ci.yml/badge.svg)](https://github.com/henryph24/speechify-clone/actions/workflows/ci.yml)
+[![CI](https://github.com/henryph24/lectern/actions/workflows/ci.yml/badge.svg)](https://github.com/henryph24/lectern/actions/workflows/ci.yml)
 
 **A Speechify-style read-aloud app that runs entirely on your own machine.**
 
