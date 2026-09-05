@@ -1,0 +1,10 @@
+node_modules/
+data/
+dist/
+.env
+*.log
+.DS_Store
+# local agent/tooling scratch — .entire/ holds session transcripts, AGENTS.md is
+# a machine-local agent brief. Neither belongs in a public repo.
+.entire/
+AGENTS.md

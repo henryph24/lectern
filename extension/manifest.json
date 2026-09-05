@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "_comment_key": "Freezes the extension id (mmchihfpfdagbgkmlccclgepjjhdcbfe) for unpacked and packed loads alike, so the engine can allowlist this extension alone instead of every chrome-extension:// origin. Public key only; no private key is needed or stored.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAleMdZNucDgcWXxV2Rbd6jslZFIdekBSVOyZW6IkrKbuRRpm/LvJ+FlCwjeBpMdnJxMGc8RPmlXHvNdpn0Gx3fO4oR+TnkmVxQkcH/TdPV/hxmQgjpFOpu79xSfjxyLBMuwMqPcIPwdxI5ZU5ph+8HmSR/ol6do9W9b2pry4IYNZHRhR00tsGLW1kNf6mNVOkfejmf5by+VbAKaFoThpKr4IkBFCOP3+uwN4JyUsOwP+suLtRDO2kmfNWy25AphogaWLQf+qENrNkNOJKb4ipMVmc7ye1rLfn5tdJwxE+YSgW1s5yTGz0yF3vc4o+mpLWFpsTY1U/DIBcuzPq63mdEwIDAQAB",
+  "name": "Lectern — read aloud",
+  "version": "1.0.0",
+  "description": "Reads the current page aloud with natural voices and in-place karaoke highlighting, powered by your local Lectern engine.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Lectern: read this page",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "background": {
+    "service_worker": "sw.js",
+    "type": "module"
+  },
+  "permissions": ["offscreen", "contextMenus", "storage", "scripting", "activeTab"],
+  "host_permissions": ["http://127.0.0.1:3000/*"],
+  "commands": {
+    "toggle-playback": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+1"
+      },
+      "description": "Play / pause Lectern",
+      "global": true
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content/extract-core.js", "content/engine.js"],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content/bridge.js"],
+      "css": ["content/lectern.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

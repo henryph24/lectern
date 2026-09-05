@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+# Read-only by default: the build jobs below run `npm install` and
+# `npx electron-builder`, both of which execute third-party dependency code.
+# Only the `release` job — which touches no dependency tree — is granted write.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Gate (unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      # npm install here, matching CI: onnxruntime-node pulls Linux-only @emnapi
+      # optional deps that the macOS-generated lockfile omits, so `npm ci` fails its
+      # in-sync check on a Linux runner. This job previously ran `npm ci` and would
+      # have failed for exactly that reason.
+      # FOLLOW-UP: regenerate the lockfile with every target platform resolved —
+      #   npm install --os=linux --cpu=x64 --os=darwin --cpu=arm64   (npm >= 10)
+      # — and both workflows can go back to the stricter `npm ci`.
+      - name: Install dependencies
+        env:
+          # onnxruntime-node's postinstall downloads a CUDA NuGet package on
+          # linux/x64 and unzips it with adm-zip, with no checksum on either step.
+          # CI never runs the on-device provider (the 398 MB Supertonic weights are
+          # not fetched here), so skip it: one less unverified archive, and a much
+          # faster install. Only linux/x64 has a CUDA manifest, so macOS is unaffected.
+          ONNXRUNTIME_NODE_INSTALL: skip
+        run: npm install
+      - run: npm run test:unit
+
+  mac-app:
+    name: Package Lectern.app (macOS arm64)
+    needs: test
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      # never hunt the CI keychain for signing identities — this is an
+      # intentionally unsigned personal build
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Cache Electron binary
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      # Same install command as every other job — see the note in `test`. The
+      # onnxruntime-node CUDA download is linux/x64-only, so nothing to skip here.
+      - run: npm install
+      - name: Stamp package version from tag
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+      # --publish never: artifact upload is the release job's responsibility
+      - run: npx electron-builder --mac zip --arm64 --publish never
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mac-app
+          path: dist/*-mac.zip
+          if-no-files-found: error
+
+  extension:
+    name: Package Chrome extension
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Zip unpacked extension
+        # -x excludes: never ship stray dotfiles (.DS_Store, editor droppings) or
+        # macOS resource-fork sidecars, at the archive root or in any subdirectory.
+        run: |
+          cd extension
+          zip -r "../lectern-extension-${GITHUB_REF_NAME}.zip" . -x '.*' -x '*/.*' -x '__MACOSX*'
+      - uses: actions/upload-artifact@v7
+        with:
+          name: extension
+          path: lectern-extension-*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: [mac-app, extension]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The only job that needs a write-scoped token, and the only one that never
+    # installs or executes repository dependencies.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+          path: artifacts
+      # Third-party action holding a write token, so it is pinned to a full commit
+      # sha. Major tags like v3 are mutable and can be repointed at any commit by
+      # the action's owner. Bump the sha and the trailing comment together.
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            **macOS app** — unzip, move `Lectern.app` to /Applications. The build is
+            unsigned, and downloads get quarantined by Gatekeeper; clear it once with:
+            ```
+            xattr -dr com.apple.quarantine /Applications/Lectern.app
+            ```
+
+            **Chrome extension** — unzip, then `chrome://extensions` → Developer mode →
+            *Load unpacked* → select the unzipped folder. Needs the Lectern app (or
+            `npm start`) running for the engine.

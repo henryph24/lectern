@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit + live integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      # npm install (not npm ci): onnxruntime-node pulls Linux-only @emnapi
+      # optional deps that a macOS-generated lockfile omits, so npm ci fails its
+      # in-sync check on the Linux runner. npm install resolves them per-platform.
+      # Release uses the same command for the same reason — keep them in step.
+      # FOLLOW-UP: regenerate the lockfile with every target platform resolved —
+      #   npm install --os=linux --cpu=x64 --os=darwin --cpu=arm64   (npm >= 10)
+      # — and both workflows can go back to the stricter `npm ci`.
+      - name: Install dependencies
+        env:
+          # onnxruntime-node's postinstall downloads a CUDA NuGet package on
+          # linux/x64 and unzips it with adm-zip, with no checksum on either step.
+          # CI never runs the on-device provider (the 398 MB Supertonic weights are
+          # not fetched here), so skip it: one less unverified archive, and a much
+          # faster install. Only linux/x64 has a CUDA manifest, so macOS is unaffected.
+          ONNXRUNTIME_NODE_INSTALL: skip
+        run: npm install
+      # unit + live Edge TTS synth + live Wikipedia extraction (keyless);
+      # the ElevenLabs live test self-skips without a key
+      - run: npm test
+
+  e2e:
+    name: e2e (web · extension · desktop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CHROME_PATH: /usr/bin/google-chrome
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Cache Electron binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install xvfb + Electron runtime deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q xvfb libasound2t64
+      # npm ci can't reconcile onnxruntime-node's Linux-only @emnapi deps, and its
+      # postinstall CUDA download is skipped — see the test job for both.
+      - name: Install dependencies
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+        run: npm install
+      - run: google-chrome --version
+      - name: Start the Lectern engine
+        run: |
+          npm start &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:3000/api/docs > /dev/null && exit 0
+            sleep 1
+          done
+          echo "engine did not come up" && exit 1
+      - name: Web e2e (real playback in headless Chrome)
+        run: npm run e2e
+      - name: Extension e2e (unpacked MV3, offscreen rehydration)
+        run: npm run e2e:extension
+      - name: Desktop e2e (dev Electron under xvfb)
+        env:
+          LECTERN_E2E_DEV: '1'
+          # npm-installed Electron has no SUID sandbox helper and Ubuntu 24
+          # runners restrict unprivileged user namespaces
+          ELECTRON_DISABLE_SANDBOX: '1'
+        run: xvfb-run --auto-servernum npm run e2e:desktop

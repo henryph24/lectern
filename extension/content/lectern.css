@@ -1,0 +1,9 @@
+/* In-place karaoke highlights. ::highlight() only honors color,
+   background-color, text-decoration and text-shadow. */
+::highlight(lectern-sentence) {
+  background-color: rgba(200, 64, 31, 0.12);
+}
+
+::highlight(lectern-word) {
+  background-color: rgba(200, 64, 31, 0.4);
+}

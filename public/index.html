@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lectern — read with your ears</title>
+  <link rel="icon" type="image/png" href="/icons/favicon.png">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="masthead">
+    <a class="wordmark" href="#/">Lectern<span class="wordmark-dot">.</span></a>
+    <span class="tagline">read with your ears</span>
+  </header>
+
+  <main id="view" class="view"></main>
+
+  <footer id="player" class="player is-hidden" aria-label="Audio player">
+    <button id="btn-play" class="play-btn" aria-label="Play or pause" title="Play / pause (Space)">
+      <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>
+      <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.4v14H7zM13.6 5H17v14h-3.6z"/></svg>
+      <span class="play-spinner" aria-hidden="true"></span>
+    </button>
+
+    <div class="skip-group">
+      <button id="btn-prev" class="ghost-btn" aria-label="Previous sentence" title="Previous sentence (←)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 6.5v11l-8-5.5zM7.5 6.5h-2v11h2z"/></svg>
+      </button>
+      <button id="btn-next" class="ghost-btn" aria-label="Next sentence" title="Next sentence (→)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6.5v11l8-5.5zM16.5 6.5h2v11h-2z"/></svg>
+      </button>
+    </div>
+
+    <div class="player-middle">
+      <div class="player-title-row">
+        <div class="eq" aria-hidden="true"><span></span><span></span><span></span></div>
+        <span id="player-title" class="player-title"></span>
+      </div>
+      <div class="progress-row">
+        <span id="time-elapsed" class="time">0:00</span>
+        <div id="progress" class="progress" role="progressbar" aria-label="Listening progress">
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+        <span id="time-remaining" class="time">–:––</span>
+      </div>
+    </div>
+
+    <div class="rate-group" title="Playback speed (+ / −)">
+      <button id="rate-down" class="ghost-btn rate-btn" aria-label="Slower">−</button>
+      <span id="rate-value" class="rate-value">1×</span>
+      <button id="rate-up" class="ghost-btn rate-btn" aria-label="Faster">+</button>
+    </div>
+
+    <select id="voice-select" class="voice-select" aria-label="Voice"></select>
+  </footer>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Always-on Lectern engine as a per-user launchd agent (macOS).
+
+  This is a TEMPLATE. Replace every __PLACEHOLDER__ below with a real absolute
+  path, then install it:
+
+    cp contrib/dev.lectern.engine.plist.example \
+       ~/Library/LaunchAgents/dev.lectern.engine.plist
+    # edit the copy: __NODE_BINARY__, __REPO_DIR__
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.lectern.engine.plist
+
+  Useful afterwards:
+
+    launchctl kickstart -k gui/$(id -u)/dev.lectern.engine   # restart after a code change
+    launchctl bootout gui/$(id -u)/dev.lectern.engine        # stop (do this before e2e:
+                                                             # the suites need port 3000)
+    launchctl print gui/$(id -u)/dev.lectern.engine          # state, last exit status
+
+  Placeholders:
+    __NODE_BINARY__   absolute path to node >= 22 (the output of
+                      `command -v node`). A bare "node" fails here: launchd
+                      agents do not inherit a login shell PATH.
+    __NODE_BIN_DIR__  the directory holding __NODE_BINARY__ (`dirname` of it)
+    __REPO_DIR__      absolute path to this checkout
+
+  The Label below is dev.lectern.engine; keep the Label, the installed
+  filename, and every launchctl argument in agreement.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>dev.lectern.engine</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__NODE_BINARY__</string>
+        <string>__REPO_DIR__/server/index.js</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_DIR__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PORT</key>
+        <string>3000</string>
+        <!-- launchd agents start with a minimal PATH. Put the directory holding
+             __NODE_BINARY__ first so child processes can find node too. -->
+        <key>PATH</key>
+        <string>__NODE_BIN_DIR__:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- ProcessType MUST be Standard (or Interactive), and MUST NOT be Background.
+         On Apple Silicon, Background pins the process to the throttled efficiency
+         cores. That starves Supertonic's on-device ONNX inference (measured 7-18x
+         slower: ~22-58 s per chunk against ~3 s), which blows past the TTS
+         synthesis timeout, and the extension hangs on "synthesizing". Network
+         providers such as Edge TTS are CPU-light and show no symptom, so the
+         failure looks like "only the on-device voice is stuck". See CLAUDE.md. -->
+    <key>ProcessType</key>
+    <string>Standard</string>
+
+    <key>StandardOutPath</key>
+    <string>__REPO_DIR__/data/lectern.log</string>
+    <key>StandardErrorPath</key>
+    <string>__REPO_DIR__/data/lectern.error.log</string>
+</dict>
+</plist>

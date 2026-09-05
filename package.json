@@ -1,0 +1,83 @@
+{
+  "name": "speechify-clone",
+  "version": "1.0.1",
+  "private": true,
+  "type": "module",
+  "main": "desktop/main.mjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "build": {
+    "appId": "dev.hungpq.lectern",
+    "productName": "Lectern",
+    "directories": {
+      "buildResources": "build"
+    },
+    "files": [
+      "desktop/**",
+      "server/**",
+      "public/**",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "public/**",
+      "node_modules/@napi-rs/canvas/**",
+      "node_modules/tesseract.js/**",
+      "node_modules/tesseract.js-core/**"
+    ],
+    "mac": {
+      "target": [
+        {
+          "target": "dir",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "identity": null,
+      "category": "public.app-category.productivity",
+      "fileAssociations": [
+        {
+          "ext": "pdf",
+          "name": "PDF Document",
+          "role": "Viewer"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "e2e": "node test/e2e/playback.e2e.mjs",
+    "e2e:extension": "node test/e2e/extension.e2e.mjs",
+    "e2e:desktop": "node test/e2e/desktop.e2e.mjs",
+    "verify:all": "npm test && npm run e2e && npm run e2e:extension && npm run e2e:desktop",
+    "fetch:supertonic": "node scripts/fetch-supertonic.mjs",
+    "icons": "node scripts/make-icons.mjs",
+    "desktop": "electron desktop/main.mjs",
+    "dist:mac": "electron-builder --mac dir"
+  },
+  "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
+    "@elevenlabs/elevenlabs-js": "^2.52.0",
+    "@mozilla/readability": "^0.6.0",
+    "@napi-rs/canvas": "^0.1.100",
+    "edge-tts-universal": "^1.4.0",
+    "express": "^5.2.1",
+    "jsdom": "^29.1.1",
+    "multer": "^2.2.0",
+    "onnxruntime-node": "^1.26.0",
+    "tesseract.js": "^7.0.0",
+    "unpdf": "^1.6.2"
+  },
+  "devDependencies": {
+    "electron": "^42.4.0",
+    "electron-builder": "^26.15.2",
+    "puppeteer-core": "^25.1.0",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.8"
+  }
+}
