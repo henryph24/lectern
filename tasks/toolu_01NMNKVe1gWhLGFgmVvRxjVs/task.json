@@ -1,0 +1,11 @@
+{
+  "tool_use_id": "toolu_01NMNKVe1gWhLGFgmVvRxjVs",
+  "agent_id": "a47518ea978d53fe9",
+  "subagent_type": "general-purpose",
+  "task_description": "Research small on-device TTS group B",
+  "files": [
+    ".goodnight/run-e2e.sh"
+  ],
+  "started_at": "2026-09-23T23:21:59.272232+07:00",
+  "completed_at": "2026-09-23T23:21:59.277523+07:00"
+}

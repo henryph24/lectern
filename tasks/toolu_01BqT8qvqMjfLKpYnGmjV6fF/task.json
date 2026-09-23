@@ -1,0 +1,12 @@
+{
+  "tool_use_id": "toolu_01BqT8qvqMjfLKpYnGmjV6fF",
+  "agent_id": "af180b97d06b2254c",
+  "subagent_type": "fork",
+  "task_description": "Research Edge TTS Multilingual/HD/Dragon/Turbo voice support",
+  "files": [
+    ".goodnight/notes.md",
+    ".goodnight/run-e2e.sh"
+  ],
+  "started_at": "2026-09-23T23:23:58.851164+07:00",
+  "completed_at": "2026-09-23T23:23:58.855663+07:00"
+}

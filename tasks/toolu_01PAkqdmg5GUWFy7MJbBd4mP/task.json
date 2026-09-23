@@ -1,0 +1,12 @@
+{
+  "tool_use_id": "toolu_01PAkqdmg5GUWFy7MJbBd4mP",
+  "agent_id": "a6b70f85782fe52d8",
+  "subagent_type": "fork",
+  "task_description": "Research Fish Audio, Amazon Polly, Speechmatics",
+  "files": [
+    ".goodnight/notes.md",
+    ".goodnight/run-e2e.sh"
+  ],
+  "started_at": "2026-09-23T23:26:22.728098+07:00",
+  "completed_at": "2026-09-23T23:26:22.733041+07:00"
+}

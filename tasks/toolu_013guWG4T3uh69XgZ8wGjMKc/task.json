@@ -1,0 +1,12 @@
+{
+  "tool_use_id": "toolu_013guWG4T3uh69XgZ8wGjMKc",
+  "agent_id": "ac6447ddf9953d507",
+  "subagent_type": "fork",
+  "task_description": "Research ElevenLabs, Cartesia, Deepgram TTS",
+  "files": [
+    ".goodnight/notes.md",
+    ".goodnight/run-e2e.sh"
+  ],
+  "started_at": "2026-09-23T23:26:01.212845+07:00",
+  "completed_at": "2026-09-23T23:26:01.216713+07:00"
+}

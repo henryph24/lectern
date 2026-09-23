@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M37JJ00ZV5H11NX2NCZDKDQX",
+  "strategy": "manual-commit",
+  "branch": "goodnight/20260924-skip-citation-markers",
+  "checkpoints_count": 3,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 108,
+    "cache_creation_tokens": 179527,
+    "cache_read_tokens": 7426237,
+    "output_tokens": 67020,
+    "api_call_count": 51,
+    "subagent_tokens": {
+      "input_tokens": 118,
+      "cache_creation_tokens": 549834,
+      "cache_read_tokens": 6511630,
+      "output_tokens": 92736,
+      "api_call_count": 59
+    }
+  }
+}
