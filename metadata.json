@@ -1,0 +1,40 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M37VPB4T2MK4CM86XJK14AC7",
+  "strategy": "manual-commit",
+  "branch": "goodnight/20260924-per-provider-queues",
+  "checkpoints_count": 3,
+  "files_touched": [
+    "server/lib/cache.js",
+    "server/lib/semaphore.js",
+    "server/providers/index.js",
+    "server/routes/tts.js",
+    "test/unit/cache.test.js",
+    "test/unit/providers.test.js",
+    "test/unit/routes.test.js",
+    "test/unit/semaphore.test.js"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 84,
+    "cache_creation_tokens": 373649,
+    "cache_read_tokens": 10155593,
+    "output_tokens": 65517,
+    "api_call_count": 39,
+    "subagent_tokens": {
+      "input_tokens": 156,
+      "cache_creation_tokens": 351386,
+      "cache_read_tokens": 15834268,
+      "output_tokens": 183052,
+      "api_call_count": 78
+    }
+  }
+}

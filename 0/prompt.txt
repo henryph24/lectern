@@ -1,0 +1,242 @@
+<task-notification>
+<task-id>a1b1954e83f3acc65</task-id>
+<tool-use-id>toolu_01AmBgBTxk6SKRVDgUo5uf2k</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-hungpq2412-lectern/97064c1e-4ab5-4528-b124-9eb075f3d556/tasks/a1b1954e83f3acc65.output</output-file>
+<status>completed</status>
+<summary>Agent "Performance hot-spot analysis" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>The narration pipeline has 8 concrete fixes worth making. The two biggest cheap wins are both for the on-device Supertonic voice: roughly halving its first-chunk wait, and removing about 1.2 s of silence at every chunk boundary. I changed nothing in the repo: all measurement scripts ran from the scratchpad and `git status` is clean.
+
+**Setup**
+- M3 Pro (6 performance + 6 efficiency cores), Node 24.11.1. The load average was 8–56 during my runs (a VM at ~97% CPU, plus another process writing to `lectern/data/`). So Supertonic absolute times are above CLAUDE.md's ~3 s per chunk; I ran each comparison interleaved to cancel the drift.
+- Every "measured" figure comes from a script you can rerun with `node &lt;file&gt;`: `/private/tmp/claude-501/-Users-hungpq2412-lectern/97064c1e-4ab5-4528-b124-9eb075f3d556/scratchpad/*.mjs`.
+
+**Top 8 (ranked by impact per effort)**
+
+1. **Run Supertonic one request at a time** (engine, S)
+- All providers share one `createSemaphore(2)` (`server/routes/tts.js:13,53`).
+- onnxruntime-node wraps a synchronous native `run()` in `setImmediate` (`node_modules/onnxruntime-node/dist/backend.js:113-117`). So two Supertonic requests take turns step by step (`helper.js:246-257`) and both finish late.
+- Both clients send chunks k and k+1 together (`queue.js:22-30`, `offscreen.js:54-62`).
+- Measured (`st-ab.mjs`, 3 runs): chunk 0 is ready at 3.6 s when it runs alone first, versus 7.4 s when sent alongside chunk 1. Chunk 1 is ready at 8.5 s versus 7.7 s, so total throughput holds.
+- Fix: one semaphore per provider, with `concurrency: 1` on the supertonic entry (`providers/index.js:30-37`).
+- Risk: low. The 120 s timeout starts inside the semaphore, so queue wait doesn't count against it.
+
+2. **Trim Supertonic leading and trailing silence** (engine, S)
+- Measured (`silence.mjs`, decoded with macOS `afconvert`): each chunk has 500–560 ms of silence at the start and 520–730 ms at the end. That is 1,230 ms of dead air at every boundary, while pauses between sentences inside a chunk are 300–470 ms.
+- Edge needs nothing: its boundaries are 470 ms against a natural 420–440 ms pause.
+- Word timing is also off: `durationToWords` (`words.js:33-50`) spreads words across the padding, so the first word starts at 0 ms while speech begins at 560 ms.
+- Fix (`supertonic.js:91-97`): cut from the first to the last 10 ms window above −45 dBFS, keep 100 ms / 250 ms pads, and time words over the kept span.
+- Gain: about 0.9 s less dead air per boundary at 1×, 0.40–0.46 s faster time to first audio, 3–11% fewer samples to encode, and the highlight lines up with speech.
+- Risk: low. Chunks already in the cache stay untrimmed unless the cache key is versioned.
+
+3. **Cut Supertonic denoising steps from 8 to 5** (engine, S, needs a quality check)
+- `supertonic.js:10` uses 8, which is also upstream's default (`nodejs/example_onnx.js`, `totalStep: 8`).
+- The vector estimator is 90% of inference time (`st-bench.mjs`: 3,376 of 3,729 ms).
+- Measured (`st-ab.mjs`, 220 chars, 3 runs): 5,285 → 3,450 ms (−35%); 4 steps gives 3,103 ms.
+- Under load, 8 steps synthesizes at 0.38–0.48 of real time, too slow for gapless playback at 3× (which needs under 0.33). 5 steps measured 0.20–0.25.
+- Risk: audio quality, which upstream has not endorsed. Do a blind A/B listen first, and version the cache key.
+
+4. **Abort stale synthesis requests** (web, extension, engine; M)
+- (a)/(h): after a seek, `pump()` does request the target first, but it counts stale fetches in `inFlight` (`queue.js:22-30`). So the target waits for an old request to finish.
+- No request carries an AbortSignal (`api.js:30-31`, `offscreen.js:69-73`).
+- Voice changes make it worse: `dispose()` (`queue.js:73-79`, called from `setVoice` in `player.js:274-286`) and `stop()` (`offscreen.js:22-29`) abandon fetches that keep holding server slots (`tts.js:53`).
+- Estimated gain: a seek or voice change during prefetch currently waits up to 0.55–0.92 s behind a fresh Edge request, or 3.6–7.4 s behind a Supertonic chunk (both durations measured).
+- Fix:
+  - One AbortController per queue entry.
+  - Abort out-of-window entries in `ensureWindow`, and everything on dispose/stop.
+  - Swallow AbortError so it doesn't show an error toast.
+  - In `tts.js`, skip synthesis if `res.on('close')` fired with `!res.writableEnded` before a slot freed up.
+- To measure: a puppeteer script that clicks a sentence in chunk k, then chunk k+10 300 ms later, timing the second click to the first highlighted word (`.w.is-active`).
+- Risk: medium, because web and extension must stay in step.
+
+5. **Move Supertonic into a worker thread** (engine, M)
+- (e): MP3 encoding with lamejs (`mp3.js:13-31`) is also synchronous: 267 ms per 18 s chunk (`micro.mjs`), 416–939 ms under load.
+- Measured (`st-worker-main.mjs`): during one synthesis, the engine's event loop was blocked for up to 490–810 ms (median 397–521 ms) in-process. In a worker it was 17–21 ms (median 5.7 ms), with the same synthesis time (4.0–5.7 s in-process vs 4.5–5.2 s in the worker).
+- So today, while Supertonic prefetches, requests from every surface can wait up to that long: cached-chunk seeks, `/api/docs`, `/api/segment`.
+- Don't lower the bitrate to save time: at 44.1 kHz, 64 kbps encodes slower (421 ms) than 128 kbps.
+- Risk: medium. The worker and the native addon must load from the packaged app bundle; `e2e:desktop` has to cover that.
+
+6. **Reuse Edge WebSockets** (engine, M)
+- (c): `edge-tts-universal/dist/index.js:386-403` opens a new socket for every request and closes it when the request finishes (line 423).
+- Measured (`edge-bench.mjs`): opening costs 218–428 ms of a 549–921 ms request.
+- One socket handled 7 requests in a row (one after 20 s idle) at 270–542 ms each. That saves 230–300 ms (35–45%) per uncached chunk on the default provider.
+- Risk: medium. The protocol is unofficial and I only tested idle up to 20 s, so it needs reconnect-and-retry. It must keep the voice allowlist check (`isKnownVoice`), text escaping, the 4096-byte split and the tick-to-ms conversion.
+
+7. **Make `updateTimes` linear** (web, S)
+- `chunkMs()` recomputes `msPerChar()` over every recorded duration, once per chunk, every 250 ms (`player.js:290-317`, `372-374`).
+- Measured (`updatetimes.mjs`): 11.4 ms per tick at 4,700 chunks and 500 durations. At 9,541 chunks and 2,000 durations it is 80.9 ms per tick, 32% of the main thread, which causes highlight jank and late chunk handoffs.
+- Fix: compute `msPerChar()` once per call. Risk: none.
+
+8. **Stream Edge audio for the chunk the user is waiting on** (engine, web, extension; L)
+- (b): the server waits for full synthesis. `edge.js:35-47` buffers the whole stream, and `tts.js:59-65` replies with base64 JSON plus words only after writing the cache.
+- Measured: on a warm service, first audio arrives at 98–235 ms and completion at 270–542 ms.
+- 4 of 35 Edge requests took 5.4–14.5 s. In the two where I logged first audio, it arrived at 3.0–4.1 s, so streaming would have saved 5–10 s there.
+- Needs MediaSource playback in both clients (the CSP's `media-src blob:` already allows it); word timings would arrive after the audio starts.
+
+**Smaller items, or no action needed (measured)**
+- (g) The base64 decode `Uint8Array.from(atob(b64), fn)` (`queue.js:40`, `offscreen.js:80`) takes 5.9 ms for an Edge chunk and 13.4 ms for a Supertonic chunk; a plain loop takes 0.7 ms. S.
+- Edge voice list: 448 ms cold, then 106–140 ms. It is paid before `route()` (`main.js:489`), and by the first voice check after engine start or 24 h cache expiry. Prefetching it at engine start fixes that. S.
+- The extension's `onSessionStart` runs segmentation, the voice fetch and offscreen-document creation one after another (`sw.js:201-252`). Running them in parallel should save 50–150 ms, but that is an unmeasured estimate.
+- Speed changes cost 0 ms: they only change `playbackRate`, with no re-synthesis.
+- The chunk handoff itself is fine: in headless Chrome the next chunk starts 24–26 ms after the previous one ends (20/20 samples). Audible gaps come from embedded silence (item 2) or prefetch falling behind (items 1 and 3).
+- (f)/(i) Nothing to gain: hashing takes 1.1 µs, a cache hit 0.18 ms, a cache write ~1 ms, and re-slicing chunk text 0.8 ms even at the 2M-character document cap.
+- (d) Hardware acceleration and thread tuning don't help:
+  - The CoreML MLProgram format fails at run time after a 9.8 s compile.
+  - The CoreML NeuralNetwork format runs in 2.7–3.7 s versus 3.4–3.8 s on CPU, with 5.9 s extra startup, so no clear gain.
+  - Setting the intra-op thread count to 6 or 8 gave no gain.
+- (d) Warm-up: loading the Supertonic models the first time takes 469–700 ms, once per engine start.
+
+**Not done**
+- No repo changes; I did not build or test any fix.
+- Items 4 and 8 and the extension estimate have no end-to-end measurement, because the e2e suites need port 3000.
+- The Supertonic figures are noisy; rerun `st-ab.mjs` on an idle machine.
+- No listening test yet for items 2 and 3.</result>
+<usage><subagent_tokens>304927</subagent_tokens><tool_uses>54</tool_uses><duration_ms>1695897</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>aff5f22291a303d34</task-id>
+<tool-use-id>toolu_01ESEREtZqeQU1ZaXeBjGDcf</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-hungpq2412-lectern/97064c1e-4ab5-4528-b124-9eb075f3d556/tasks/aff5f22291a303d34.output</output-file>
+<status>completed</status>
+<summary>Agent "Web research: latest fitting TTS models" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Final count is 1,298 words, under the limit. One disclosure to add: the leaderboard subagent said it created and then deleted scratch files in the session scratchpad. I've made room for that by dropping a redundant headline bullet.
+
+**Headline**
+- **Supertonic is discontinued.** A notice on 2026-07-23 ended development, the repo was archived on 2026-09-09, and the weights now live under `supertone-oss-archive`. There is no release newer than Supertonic 3 [S1].
+- **Best on-device addition: Kokoro-82M v1.0**, run in onnxruntime-node using its timestamped ONNX export and HeadTTS's MIT-licensed dictionary for G2P. Of the models I checked, it is the only one that meets all seven criteria.
+
+**1. Ranked on-device shortlist**
+
+**1. Kokoro-82M v1.0** (no hexgrad release since; HF repo last changed 2025-04-10†)
+- **Node:** onnxruntime-node 1.29.0, which Lectern already has, loaded `model.onnx` from a buffer and returned `waveform` + `durations` (L3).
+- **License:** Apache-2.0 for code and weights [S8].
+- **Naturalness:**
+  - TTS Arena V2: #30, Elo 1477 ±25, 1033 votes [S4].
+  - Artificial Analysis: #49, Elo 1061 [S5].
+  - Supertonic is on neither board.
+  - UTMOS against Supertonic-3: 4.44 vs 4.32 at 5 steps [S6]; 4.23 vs 4.17 [S7].
+- **RTF:**
+  - 0.226 at fp32, in the same run and on the same text as Supertonic-3, which scored 0.309 at 8 steps and 0.161 at 5 steps (L3).
+  - Apple M4 CPU: 9.0x real-time [S7].
+  - M2 Air, Node CPU, fp32: 0.22 [S9].
+- **Word timing: native.**
+  - `durations` is float32 [1 x tokens+2] at 40 frames/s.
+  - The durations summed to 19.70 s against 19.43 s of actual audio.
+  - They give word spans such as "history 0.44–0.80 s" (L3).
+  - For comparison, Lectern's Supertonic timings are a linear interpolation by character offset (`durationToWords`).
+- **G2P: required.**
+  - HeadTTS's en-us module maps the CMU dictionary (BSD) to Misaki symbols: 125k lines, 2.8 MB. Unknown words fall back to 1976 NRL letter-to-sound rules.
+  - It is MIT-licensed and "doesn't use eSpeak" [S9].
+  - 49 of the 50 words in my test text were dictionary hits (L3).
+  - GPL alternative: npm `phonemizer` 1.2.1 bundles espeak-ng (GPL-3.0)† [S14].
+- **Size:** fp32 325.5 MB, fp16 163.2 MB, q8 92.4 MB; 28 English voices at about 0.52 MB each [S8]. I could not measure RAM cleanly.
+
+**2. Pocket TTS (Kyutai):** pocket-tts 3.2.0 reached PyPI on 2026-09-23 with new `english_2026-09` weights [S10].
+- **Node:** there is no official JS. sherpa-onnx-node 1.13.8 (2026-09-10) runs it but returns only audio samples, and word timestamps are not planned [S12]†. Community ONNX and C++ ports exist [S10].
+- **License:** MIT code; CC-BY-4.0 weights behind a click-through with prohibited-use terms [S10].
+- **Naturalness:** UTMOS 4.10 vs Supertonic-3's 4.32 [S6], and 4.03 vs 4.17 [S7]. WER 1.84 vs Kokoro's 1.93 [S11]. It is on neither arena. It fails criterion 3 on UTMOS.
+- **RTF:** about 6x real-time on a MacBook Air M4 using 2 cores [S10]; 8.8x on an M4 CPU [S7].
+- **Word timing:** none, because the model is autoregressive. A community Python fork adds timestamps [S10]; from Node it would need forced alignment.
+- **G2P:** none (SentencePiece tokenizer).
+- **Size:** 219 MB safetensors [S10]. RAM not verified.
+
+**3. Kitten TTS 0.8** (2026-02-19)† [S13]
+- **Node:** ONNX weights; shipped in sherpa-onnx-node; an unofficial kitten-tts-js 0.1.2 exists.
+- **License:** Apache-2.0.
+- **Naturalness:** I found no evaluation of 0.8. The older Nano 0.1 scores UTMOS 3.69 and WER 10.4%, against Supertonic-3's 4.17 and 5.6% [S7]. On current evidence it fails criterion 3.
+- **RTF:** 8.2x real-time on an M4 CPU (Nano 0.1) [S7].
+- **Word timing:** the ONNX graph has a `duration` output; whether it is per-phoneme is not verified.
+- **G2P:** espeak-ng (GPL-3.0).
+- **Size:** 24.4 to 78.3 MB†.
+
+**Excluded** [S7]:
+- Too slow on an M4 CPU: Chatterbox Turbo (UTMOS 4.33 but 0.8x real-time), VibeVoice-Realtime (0.3x), and Qwen3-TTS, CSM and IndexTTS-2 (0.1x to 0.2x).
+- UTMOS below Supertonic-3: Soprano 1.1 (4.06, also no durations), Piper (3.98, GPL engine), NeuTTS Air and Nano (3.91 and 3.39).
+- CosyVoice 3, Orpheus, Higgs, Dia2, Maya1, S1-mini and Kyutai TTS 1.6B need Python, CUDA or multi-GB Metal sidecars, and several are non-commercial†.
+- **Watch list:** Scylla's Band (Apache-2.0, about 103M parameters, UTMOS 4.39 [S7]). I found no Node path.
+
+**2. Verdict: add Kokoro as a fourth provider, and keep Supertonic-3 for its 31 languages.** Integrating it would take:
+- **Weights:** `onnx-community/Kokoro-82M-v1.0-ONNX-timestamped` at revision `dd4401a9add81ac692d20e240d22ec9dda82cc29` [S8].
+  - Pin sha256 hashes in a new `scripts/fetch-kokoro.mjs` modeled on `fetch-supertonic.mjs`.
+  - Ship q8 (92.4 MB) or fp32 (325.5 MB), plus the chosen `voices/*.bin` files.
+- **Runtime:** onnxruntime-node. Inputs are `input_ids` (int64 [1, n+2], padded with 0), `style` (float32 [1,256], row n of the voice file) and `speed` (float32 [1]). The 24 kHz output can go straight into the existing `pcmFloatToMp3`. Expected RTF is about 0.23 (L3).
+- **G2P:** vendor `modules/language-en-us.mjs` and `dictionaries/en-us.txt` from `@met4citizen/headtts@1.3.0` (MIT) [S9]. Its word-to-phoneme spans are what make the word timings possible.
+- **Word timings:**
+  - Sum the durations for each word's phonemes and divide by 40 to get seconds.
+  - Rescale to the real audio length; I measured 1.4% drift (L3).
+  - Take character offsets from the existing Intl.Segmenter pass.
+- **Context cap:** 510 tokens per call. My 299-character chunk became 307 tokens (L3), but `server/lib/segment.js` allows chunks up to 1500 characters. The provider must therefore split anything above roughly 490 characters.
+- **Wiring** (per the CLAUDE.md parity rule): `server/providers/kokoro.js`, `providers/index.js` (120 s timeout, no retry on timeout), `routes/voices.js`, `public/js/main.js`, and `fillVoices` in `extension/content/engine.js`.
+
+**(a) Supertonic status and settings**
+- **Versions:** the HF API lists only v1, v2 and v3 under `Supertone`, last changed 2026-05-18.
+- **Archive copy:** `supertone-oss-archive/supertonic-3` at revision `aafc6e32416a594460b32413efc49d7fe4ce6d46` [S2].
+  - Its 4 ONNX sha256 hashes, and the 4 JSON files I hashed, match Lectern's pins (L4).
+  - Only `REPO` and `REV` in `scripts/fetch-supertonic.mjs` need to change.
+  - The old repo still resolves today.
+- **Recommended settings:** the default is 8 steps, which Lectern already uses; 10 steps is documented as higher quality. Speed defaults to 1.05, with 0.9 to 1.5 recommended [S3]. At 2 steps, UTMOS drops to 1.53 [S6].
+- **Gotcha:** v3 parses 10 inline tags such as `&lt;laugh&gt;` [S1], so literal tags in web text would be voiced as expressions (assumed, not tested).
+
+**3. Edge voices** (L1, L2; edge-tts-universal 1.4.0)
+- **Live voice list:** 322 voices, 47 English, 12 Multilingual. The English Multilingual voices are Ava, Andrew, Emma and Brian (en-US) and William (en-AU). There are no HD or Dragon entries.
+- **Multilingual voices work:** all five returned audio and 14 WordBoundary events for a 14-word sentence.
+- **Dragon HD fails:** `en-US-Ava:DragonHDLatestNeural`, `en-US-Andrew:DragonHDLatestNeural` and `en-US-Ava3:DragonHDLatestNeural` all failed with "No audio was received".
+  - Dragon HD is a paid Azure tier† (Microsoft Tech Community, 2025-03-31).
+  - On Artificial Analysis, the paid "Azure HD 2.5" ranks #22 (1132) and "Azure Neural" #63 (1033) [S5].
+- **Action:** keep `en-US-AvaMultilingualNeural` as the default and add `en-AU-WilliamMultilingualNeural` to `CURATED_VOICE_IDS`. Community favourites centre on the Emma, Andrew and Brian Multilingual voices† (rany2/edge-tts discussion #340, Dec 2024 to Jul 2026).
+- **Word boundaries:** edge-tts-universal hardcodes `wordBoundaryEnabled: true`. The Python edge-tts switched its default to SentenceBoundary in v7.2.0 (2025-08-05)†, which does not affect Lectern.
+- **Reliability:** 403 and "No audio" outages were reported from Dec 2025 to Feb 2026† [S15]. The endpoint worked in my tests today.
+
+**4. Cloud APIs**
+- **Speechify Simba 3.2:** Artificial Analysis #3, Elo 1238 [S5].
+  - Price per 1M characters: $10 (Starter), $8 (Pro), $6 (Scale). A subscription is required; the free plan includes 500K characters a month [S16].
+  - `POST /v1/audio/speech` returns speech marks for every model: start and end times in ms for each word, plus character offsets into the input (SSML-escaped) [S16]. That matches Lectern's word format directly.
+  - Simba 3.2 is English only; Simba 3.0 covers 6 languages.
+- **Inworld Realtime TTS-2:** Artificial Analysis #2, Elo 1243; TTS-2 Flash is #6 at 1214 [S5].
+  - Price per 1M characters: $25 down to $12.50 depending on plan; Flash $15 down to $7 [S17].
+  - `timestampType: "WORD"` returns `wordAlignment` (words with start and end seconds) but no character offsets, so Lectern's existing sequential matcher would be reused [S17].
+- **Runner-up:** Cartesia Sonic 3.6, Artificial Analysis #1 (1278), $49 per 1M characters, word timestamps via `add_timestamps` [S5, S18].
+- **No word timestamps:** OpenAI gpt-4o-mini-tts, Gemini TTS and Chirp 3 HD† [S19].
+
+**Sources** († = read by a research subagent; I did not re-open it myself)
+- S1 github.com/supertone-oss-archive/supertonic (archived 2026-09-09)
+- S2 huggingface.co/supertone-oss-archive/supertonic-3 (created 2026-09-08)
+- S3 github.com/supertone-oss-archive/supertonic/blob/main/nodejs/README.md (2026-09-09)
+- S4 tts-agi-tts-arena-v2.hf.space/api/leaderboard (read 2026-09-23)
+- S5 artificialanalysis.ai/text-to-speech/leaderboard (read 2026-09-23)
+- S6 heyneo.com/blog/kokoro-supertonic-inflect-nano-pocket-tts-cpu-benchmark (2026-07-06; a vendor's AI-agent promo, run on a Xeon CPU)
+- S7 github.com/5uck1ess/tts-bench: scoring/scores.csv (2026-09-22), docs/results.md (2026-07-17)
+- S8 huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX-timestamped (2025-02-21)
+- S9 github.com/met4citizen/HeadTTS; npm @met4citizen/headtts 1.3.0 (2026-04-03)
+- S10 github.com/kyutai-labs/pocket-tts; huggingface.co/kyutai/pocket-tts (2026-09-23)
+- S11 arxiv.org/abs/2509.06926v3, Table 12 (2026-01-13)
+- S12 github.com/k2-fsa/sherpa-onnx/issues/3727 (2026-07-07)
+- S13 github.com/KittenML/KittenTTS
+- S14 npmjs.com/package/phonemizer (2025-01-16)
+- S15 github.com/rany2/edge-tts releases; issues #443 (2025-12-08) and #458 (2026-01-20)
+- S16 speechify.ai/text-to-speech-api; docs.speechify.ai/build/guides/text-to-speech/speech-marks (read 2026-09-23)
+- S17 inworld.ai/pricing; docs.inworld.ai/api-reference/ttsAPI/texttospeech/synthesize-speech-async (read 2026-09-23)
+- S18 docs.cartesia.ai/api-reference/tts/sse (API version 2026-08-14)
+- S19 platform.openai.com/docs/guides/text-to-speech; Google Chirp 3 HD SSML docs (2026-09-18)
+
+**Local evidence** (run on your M3 Pro; nothing written to disk)
+- **L1** `listVoices()`: "total voices 322 / english voices 47 / HD/Dragon/Turbo in list: none".
+- **L2** `Communicate().stream()`: Multilingual voices "OK ... WordBoundary 14"; Dragon ids "FAIL No audio was received".
+- **L3** in-memory benchmark: "KOKORO fp32 audio s 19.43 median ms 4390 RTF 0.226"; "SUPERTONIC-3 steps=5 RTF 0.161"; "steps=8 RTF 0.309".
+  - The load average was 13 to 18 during this run.
+  - An earlier Supertonic run at load 97 gave 0.755 at 8 steps, so treat all my RTFs as upper bounds.
+- **L4** HF LFS sha256 values and in-memory hashes of the JSON files, compared with the pins in `fetch-supertonic.mjs`: 8 of 8 match.
+
+**Not verified:** RAM use for any model; Kitten 0.8's quality and what its `duration` output means; a human listening test of Kokoro against Supertonic-3; how Scylla's Band could run from Node; whether the Edge outages will recur; the GPL implications of shipping espeak-ng.
+
+**Not done:** I created or modified no project files. One research subagent reported that it created and then deleted scratch files in the session scratchpad. No Kokoro code is written. I made no Speechify, Inworld or Cartesia calls because there are no keys. The benchmarks ran on a loaded machine.</result>
+<usage><subagent_tokens>401374</subagent_tokens><tool_uses>72</tool_uses><duration_ms>2326450</duration_ms></usage>
+</task-notification>
+
+---
+
+/good-night
