@@ -177,6 +177,10 @@
       const el = node;
       const tag = el.tagName;
       if (SKIP_TAGS.has(tag)) return;
+      // footnote/citation markers ([1], [citation needed]) are a <sup> around a
+      // link; a link-free <sup> (an exponent) is content. Mirrors
+      // server/lib/extract/blocks.js so both surfaces read the same words.
+      if (tag === 'SUP' && el.querySelector('a')) return;
       const role = el.getAttribute('role');
       if (role && SKIP_ROLES.has(role.trim().toLowerCase())) return;
       if (el.getAttribute('aria-hidden') === 'true') return;

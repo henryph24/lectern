@@ -338,3 +338,41 @@ describe('oversized blocks', () => {
     expect(again.map((b) => b.text)).toEqual(blocks.map((b) => b.text));
   });
 });
+
+describe('citation markers', () => {
+  const read = (html) => {
+    const d = new JSDOM(`<!DOCTYPE html><html><body><article>${html}</article></body></html>`);
+    return { doc: d.window.document, blocks: core.collectBlocks(core.pickRoot(d.window.document), d.window) };
+  };
+
+  it('skips reference superscripts, so "[1][2]" is never read aloud', () => {
+    const { blocks } = read(
+      '<p>Turing was born in 1912.<sup class="reference"><a href="#cite_note-1">[1]</a></sup>' +
+        '<sup class="reference"><a href="#cite_note-2">[2]</a></sup> He studied at King\'s.</p>',
+    );
+    expect(blocks.map((b) => b.text)).toEqual(["Turing was born in 1912. He studied at King's."]);
+  });
+
+  it('skips a [citation needed] superscript', () => {
+    const { blocks } = read(
+      '<p>A bold claim.<sup><i>[<a href="/wiki/Wikipedia:Citation_needed">citation needed</a>]</i></sup> More text.</p>',
+    );
+    expect(blocks.map((b) => b.text)).toEqual(['A bold claim. More text.']);
+  });
+
+  it('keeps superscripts without a link', () => {
+    const { blocks } = read('<p>E = mc<sup>2</sup> held.</p>');
+    expect(blocks.map((b) => b.text)).toEqual(['E = mc2 held.']);
+  });
+
+  it('still maps every word after a skipped marker to its live DOM range', () => {
+    const { blocks } = read(
+      '<p>Born in 1912.<sup><a href="#cite_note-1">[1]</a></sup> He studied mathematics.</p>',
+    );
+    const [block] = blocks;
+    for (const { segment, index, isWordLike } of wordSegmenter.segment(block.text)) {
+      if (!isWordLike) continue;
+      expect(core.rangeFor(block, index, index + segment.length).toString()).toBe(segment);
+    }
+  });
+});
