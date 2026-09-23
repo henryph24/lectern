@@ -10,9 +10,15 @@ export function createCache(dir) {
   const ready = mkdir(dir, { recursive: true });
   const audioPath = (key) => path.join(dir, `${key}.mp3`);
   const metaPath = (key) => path.join(dir, `${key}.json`);
+  // Entries whose files are still being written. The TTS route answers before
+  // it persists, so a repeat request can arrive mid-write; it is served from
+  // memory and never synthesizes the same audio twice.
+  const writing = new Map();
 
   return {
     async get(key) {
+      const pending = writing.get(key);
+      if (pending) return pending;
       try {
         await ready;
         const [audio, meta] = await Promise.all([
@@ -27,11 +33,16 @@ export function createCache(dir) {
     },
 
     async put(key, { audio, format, words }) {
-      await ready;
-      await writeFile(`${audioPath(key)}.tmp`, audio);
-      await writeFile(`${metaPath(key)}.tmp`, JSON.stringify({ format, words }));
-      await rename(`${audioPath(key)}.tmp`, audioPath(key));
-      await rename(`${metaPath(key)}.tmp`, metaPath(key));
+      writing.set(key, { audio, format, words });
+      try {
+        await ready;
+        await writeFile(`${audioPath(key)}.tmp`, audio);
+        await writeFile(`${metaPath(key)}.tmp`, JSON.stringify({ format, words }));
+        await rename(`${audioPath(key)}.tmp`, audioPath(key));
+        await rename(`${metaPath(key)}.tmp`, metaPath(key));
+      } finally {
+        writing.delete(key);
+      }
     },
   };
 }
