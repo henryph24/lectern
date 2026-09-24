@@ -22,16 +22,16 @@
 //
 // ─── Bumping the model (how SHA256 below was generated) ──────────────────────
 // 1. Read the new head commit sha and put it in REV:
-//      curl -s https://huggingface.co/api/models/Supertone/supertonic-3 | jq -r .sha
+//      curl -s https://huggingface.co/api/models/supertone-oss-archive/supertonic-3 | jq -r .sha
 // 2. The four large .onnx files are Git-LFS, and LFS pointers carry the sha256
 //    as their oid — so the tree API hands them over without downloading 398 MB:
 //      REV=<sha from step 1>
 //      for d in onnx voice_styles; do
-//        curl -s "https://huggingface.co/api/models/Supertone/supertonic-3/tree/$REV/$d?recursive=true"
+//        curl -s "https://huggingface.co/api/models/supertone-oss-archive/supertonic-3/tree/$REV/$d?recursive=true"
 //      done | jq -r '.[] | select(.lfs) | "\(.path) \(.lfs.oid)"'
 // 3. The small JSON files are plain git blobs (no .lfs field, a few hundred KB
 //    each) — fetch and hash them directly:
-//      curl -sL "https://huggingface.co/Supertone/supertonic-3/resolve/$REV/<path>" | shasum -a 256
+//      curl -sL "https://huggingface.co/supertone-oss-archive/supertonic-3/resolve/$REV/<path>" | shasum -a 256
 //    Cross-check each one against the tree API's git blob `oid` with
 //    `git hash-object <file>` before trusting it.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -43,10 +43,15 @@ import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const REPO = 'Supertone/supertonic-3';
-// Immutable commit sha — verified as the head of `main` on 2026-09-05 via
-// https://huggingface.co/api/models/Supertone/supertonic-3 (.sha).
-const REV = '3cadd1ee6394adea1bd021217a0e650ede09a323';
+// Supertone ended Supertonic development (notice 2026-07-23) and archived the
+// project on 2026-09-09; the weights now live under supertone-oss-archive.
+// The files are byte-identical to the Supertone/supertonic-3 revision pinned
+// before (3cadd1ee…): all 16 digests below were re-checked against this
+// revision's tree on 2026-09-24 (LFS oids, and git blob oids for the JSON).
+const REPO = 'supertone-oss-archive/supertonic-3';
+// Immutable commit sha, the head of `main` on 2026-09-24 via
+// https://huggingface.co/api/models/supertone-oss-archive/supertonic-3 (.sha).
+const REV = 'aafc6e32416a594460b32413efc49d7fe4ce6d46';
 const BASE = `https://huggingface.co/${REPO}/resolve/${REV}`;
 
 const ONNX = ['duration_predictor.onnx', 'text_encoder.onnx', 'vector_estimator.onnx', 'vocoder.onnx', 'tts.json', 'unicode_indexer.json'];
