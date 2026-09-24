@@ -1,0 +1,31 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M38S1081JHTBX6RYJ8X9MYSN",
+  "strategy": "manual-commit",
+  "branch": "goodnight/20260924-supertonic-archive-fetch",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 20,
+    "cache_creation_tokens": 15389,
+    "cache_read_tokens": 2819226,
+    "output_tokens": 7349,
+    "api_call_count": 9,
+    "subagent_tokens": {
+      "input_tokens": 252,
+      "cache_creation_tokens": 888388,
+      "cache_read_tokens": 33890607,
+      "output_tokens": 276610,
+      "api_call_count": 126
+    }
+  }
+}
