@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   // per-provider synthesis policy, flippable per test (reset in beforeEach)
   edgeTimeoutMs: 20_000,
   edgeRetryOnTimeout: true,
+  edgeConcurrency: 2,
+  elevenSynthesize: vi.fn(),
+  elevenTimeoutMs: 20_000,
 }));
 
 vi.mock('../../server/providers/index.js', () => {
@@ -28,12 +31,18 @@ vi.mock('../../server/providers/index.js', () => {
       get retryOnTimeout() {
         return mocks.edgeRetryOnTimeout;
       },
+      get concurrency() {
+        return mocks.edgeConcurrency;
+      },
     },
     elevenlabs: {
-      synthesize: vi.fn(),
+      synthesize: mocks.elevenSynthesize,
       voices: vi.fn(async () => []),
       isKnownVoice: vi.fn(async () => true),
       available: mocks.elevenAvailable,
+      get timeoutMs() {
+        return mocks.elevenTimeoutMs;
+      },
     },
     supertonic: {
       synthesize: vi.fn(),
@@ -52,7 +61,9 @@ vi.mock('../../server/providers/index.js', () => {
   };
 });
 
+import express from 'express';
 import { createApp } from '../../server/app.js';
+import { ttsRouter } from '../../server/routes/tts.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => path.join(here, '..', 'fixtures', name);
@@ -77,6 +88,9 @@ beforeEach(() => {
   mocks.elevenAvailable.mockReturnValue(false);
   mocks.edgeTimeoutMs = 20_000;
   mocks.edgeRetryOnTimeout = true;
+  mocks.edgeConcurrency = 2;
+  mocks.elevenSynthesize.mockReset();
+  mocks.elevenTimeoutMs = 20_000;
 });
 
 const importText = (text, title) =>
@@ -172,6 +186,109 @@ describe('POST /api/tts', () => {
     expect(res.status).toBe(503);
     expect(res.body.error).toContain('noise glitch');
     expect(mocks.edgeSynthesize).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('POST /api/tts synthesis queues', () => {
+  const words = [{ text: 'Hi', startMs: 0, endMs: 200, charStart: 0, charEnd: 2 }];
+  const ok = () => ({ audio: Buffer.from('AUDIO'), format: 'mp3', words });
+  // a fresh app per test: each router builds its per-provider queues once
+  const freshApp = () => createApp({ dataDir });
+
+  it('gives each provider its own queue, so a slow provider never starves another', async () => {
+    const local = freshApp();
+    mocks.elevenAvailable.mockReturnValue(true);
+    mocks.elevenTimeoutMs = 300;
+    mocks.elevenSynthesize.mockImplementation(() => new Promise(() => {})); // stuck
+    mocks.edgeSynthesize.mockResolvedValue(ok());
+    const stuck = [1, 2].map((n) =>
+      request(local)
+        .post('/api/tts')
+        .send({ provider: 'elevenlabs', voice: 'v', text: `Stuck ${n}.` })
+        .then((r) => r), // supertest only sends once awaited
+    );
+    await vi.waitFor(() => expect(mocks.elevenSynthesize).toHaveBeenCalledTimes(2));
+    const started = Date.now();
+    const edge = await request(local)
+      .post('/api/tts')
+      .send({ provider: 'edge', voice: 'v', text: 'Not queued behind them.' });
+    expect(edge.status).toBe(200);
+    expect(Date.now() - started).toBeLessThan(250); // did not wait for the 300 ms timeouts
+    await Promise.all(stuck);
+  });
+
+  it('runs a provider no wider than its declared concurrency', async () => {
+    mocks.edgeConcurrency = 1;
+    const local = freshApp();
+    let active = 0;
+    let peak = 0;
+    mocks.edgeSynthesize.mockImplementation(async () => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((r) => setTimeout(r, 20));
+      active--;
+      return ok();
+    });
+    const res = await Promise.all(
+      [1, 2, 3].map((n) =>
+        request(local).post('/api/tts').send({ provider: 'edge', voice: 'v', text: `One at a time ${n}.` }),
+      ),
+    );
+    expect(res.map((r) => r.status)).toEqual([200, 200, 200]);
+    expect(peak).toBe(1);
+  });
+
+  it('answers as soon as the audio exists, before the cache write lands', async () => {
+    let persisted = false;
+    const slowCache = {
+      get: vi.fn(async () => null),
+      put: vi.fn(() => new Promise((r) => setTimeout(() => { persisted = true; r(); }, 400))),
+    };
+    const local = express().use(express.json()).use('/api/tts', ttsRouter({ cache: slowCache }));
+    mocks.edgeSynthesize.mockResolvedValue(ok());
+    const started = Date.now();
+    const res = await request(local).post('/api/tts').send({ provider: 'edge', voice: 'v', text: 'Reply first.' });
+    expect(res.status).toBe(200);
+    expect(res.body.cached).toBe(false);
+    expect(Date.now() - started).toBeLessThan(300);
+    expect(persisted).toBe(false);
+    expect(slowCache.put).toHaveBeenCalledTimes(1);
+  });
+
+  it('still returns the audio when writing the cache fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const brokenCache = { get: vi.fn(async () => null), put: vi.fn(async () => { throw new Error('disk full'); }) };
+    const local = express().use(express.json()).use('/api/tts', ttsRouter({ cache: brokenCache }));
+    mocks.edgeSynthesize.mockResolvedValue(ok());
+    const res = await request(local).post('/api/tts').send({ provider: 'edge', voice: 'v', text: 'Disk is full.' });
+    expect(res.status).toBe(200);
+    await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+    expect(String(warn.mock.calls[0][0])).toContain('disk full');
+    warn.mockRestore();
+  });
+
+  it('never synthesizes a queued request whose client has gone away', async () => {
+    mocks.edgeConcurrency = 1;
+    const local = freshApp();
+    const { providers } = await import('../../server/providers/index.js');
+    let release;
+    mocks.edgeSynthesize
+      .mockImplementationOnce(() => new Promise((r) => { release = () => r(ok()); }))
+      .mockResolvedValue(ok());
+    const first = request(local).post('/api/tts').send({ provider: 'edge', voice: 'v', text: 'Holds the slot.' });
+    const firstDone = first.then((r) => r);
+    await vi.waitFor(() => expect(mocks.edgeSynthesize).toHaveBeenCalledTimes(1));
+    const known = providers.edge.isKnownVoice.mock.calls.length;
+    const second = request(local).post('/api/tts').send({ provider: 'edge', voice: 'v', text: 'Abandoned while queued.' });
+    second.end(() => {}); // start it; the client is about to hang up
+    await vi.waitFor(() => expect(providers.edge.isKnownVoice.mock.calls.length).toBe(known + 1));
+    await new Promise((r) => setTimeout(r, 30)); // past the cache lookup, into the queue
+    second.abort();
+    await new Promise((r) => setTimeout(r, 30));
+    release();
+    expect((await firstDone).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(mocks.edgeSynthesize).toHaveBeenCalledTimes(1);
   });
 });
 

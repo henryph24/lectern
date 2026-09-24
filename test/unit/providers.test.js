@@ -246,4 +246,12 @@ describe('provider registry', () => {
     expect(providers.supertonic.retryOnTimeout).toBe(false);
     expect(providers.supertonic.timeoutMs).toBeGreaterThanOrEqual(60_000);
   });
+
+  it('declares how many syntheses may run at once per provider', () => {
+    // network providers overlap well
+    expect(providers.edge.concurrency).toBe(2);
+    expect(providers.elevenlabs.concurrency).toBe(2);
+    // on-device inference interleaves step by step, so run it one at a time
+    expect(providers.supertonic.concurrency).toBe(1);
+  });
 });

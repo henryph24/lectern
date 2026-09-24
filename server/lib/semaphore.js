@@ -1,29 +1,53 @@
+// The error a queued task settles with when its signal aborts before it gets
+// a slot. Callers tell it apart by name (the Web platform's convention).
+function abandonedError() {
+  return Object.assign(new Error('Abandoned before a slot was free'), { name: 'AbortError' });
+}
+
 export function createSemaphore(max) {
   let active = 0;
   const waiters = [];
 
-  const acquire = () =>
-    new Promise((resolve) => {
+  const acquire = (signal) =>
+    new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(abandonedError());
+        return;
+      }
       if (active < max) {
         active++;
         resolve();
-      } else {
-        waiters.push(resolve);
+        return;
       }
+      const waiter = { resolve, signal, onAbort: null };
+      if (signal) {
+        // leave the queue at once: an abandoned task must neither run nor
+        // hold a place ahead of live ones
+        waiter.onAbort = () => {
+          const at = waiters.indexOf(waiter);
+          if (at !== -1) waiters.splice(at, 1);
+          reject(abandonedError());
+        };
+        signal.addEventListener('abort', waiter.onAbort, { once: true });
+      }
+      waiters.push(waiter);
     });
 
   const release = () => {
     const next = waiters.shift();
     if (next) {
-      next();
+      next.signal?.removeEventListener('abort', next.onAbort);
+      next.resolve();
     } else {
       active--;
     }
   };
 
   return {
-    async run(fn) {
-      await acquire();
+    // `signal` covers the wait for a slot only: once `fn` starts it runs to
+    // completion, whatever the signal does afterwards.
+    async run(fn, { signal } = {}) {
+      await acquire(signal);
       try {
         return await fn();
       } finally {

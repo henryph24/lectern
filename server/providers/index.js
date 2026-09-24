@@ -8,8 +8,14 @@ import * as supertonic from './supertonic.js';
 // CPU-bound and much slower, especially for long chunks — so it needs a far
 // larger ceiling; and because a timed-out inference is uncancelable and keeps
 // using CPU, it must never be retried on timeout (a second attempt would race
-// the abandoned first one and slow both down). `timeoutMs`/`retryOnTimeout` are
-// consumed by routes/tts.js.
+// the abandoned first one and slow both down). `concurrency` is how many
+// syntheses of one provider run at once; each provider gets its own queue.
+// Network providers overlap well. onnxruntime-node runs each inference step
+// synchronously and yields between steps, so two Supertonic requests
+// interleave step by step and both finish late: one at a time delivers the
+// chunk the listener is waiting on about twice as soon (3.6 s vs 7.4 s
+// measured) for the same total throughput. `timeoutMs`/`retryOnTimeout`/
+// `concurrency` are consumed by routes/tts.js.
 export const providers = {
   edge: {
     synthesize: edge.synthesize,
@@ -18,6 +24,7 @@ export const providers = {
     available: () => true,
     timeoutMs: 20_000,
     retryOnTimeout: true,
+    concurrency: 2,
   },
   elevenlabs: {
     synthesize: elevenlabs.synthesize,
@@ -26,6 +33,7 @@ export const providers = {
     available: elevenlabs.available,
     timeoutMs: 20_000,
     retryOnTimeout: true,
+    concurrency: 2,
   },
   supertonic: {
     synthesize: supertonic.synthesize,
@@ -34,6 +42,7 @@ export const providers = {
     available: supertonic.available,
     timeoutMs: 120_000,
     retryOnTimeout: false,
+    concurrency: 1,
   },
 };
 

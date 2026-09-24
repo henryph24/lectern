@@ -80,4 +80,42 @@ describe('createSemaphore', () => {
     // if the slot leaked, this second task would hang forever
     await expect(sem.run(async () => 'after')).resolves.toBe('after');
   });
+
+  it('never runs a task whose signal is already aborted, and keeps the slot free', async () => {
+    const sem = createSemaphore(1);
+    const fn = vi.fn(async () => 'ran');
+    const gone = AbortSignal.abort();
+    await expect(sem.run(fn, { signal: gone })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fn).not.toHaveBeenCalled();
+    await expect(sem.run(async () => 'next')).resolves.toBe('next');
+  });
+
+  it('drops a queued task whose signal aborts while it waits for a slot', async () => {
+    const sem = createSemaphore(1);
+    let release;
+    const holder = sem.run(() => new Promise((r) => { release = r; }));
+    const abandoned = new AbortController();
+    const queuedFn = vi.fn(async () => 'should not run');
+    const queued = sem.run(queuedFn, { signal: abandoned.signal });
+    const after = sem.run(async () => 'after');
+    abandoned.abort();
+    // settles right away, before the holder frees its slot
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    release('held');
+    await expect(holder).resolves.toBe('held');
+    await expect(after).resolves.toBe('after');
+    expect(queuedFn).not.toHaveBeenCalled();
+  });
+
+  it('lets a task that already started finish when its signal aborts later', async () => {
+    const sem = createSemaphore(1);
+    const ctl = new AbortController();
+    const result = sem.run(async () => {
+      ctl.abort();
+      await new Promise((r) => setTimeout(r, 5));
+      return 'finished';
+    }, { signal: ctl.signal });
+    await expect(result).resolves.toBe('finished');
+    await expect(sem.run(async () => 'free')).resolves.toBe('free');
+  });
 });

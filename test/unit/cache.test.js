@@ -48,4 +48,15 @@ describe('createCache', () => {
     expect(hit.format).toBe('mp3');
     expect(hit.words).toEqual(words);
   });
+
+  it('serves an entry from memory while its files are still being written', async () => {
+    const key = 'b'.repeat(64);
+    const entry = { audio: Buffer.from('MID-WRITE'), format: 'mp3', words: [] };
+    const writing = cache.put(key, entry);
+    const early = await cache.get(key); // the route answers before put() settles
+    expect(early.audio.toString()).toBe('MID-WRITE');
+    await writing;
+    const late = await cache.get(key);
+    expect(late.audio.toString()).toBe('MID-WRITE');
+  });
 });
