@@ -11,5 +11,8 @@ describe('URL extraction — live fetch', () => {
     const all = result.blocks.map((b) => b.text).join(' ').toLowerCase();
     expect(all).toContain('text');
     for (const b of result.blocks) expect(b.text.trim().length).toBeGreaterThan(0);
+    // the article carries 100+ citation superscripts; none may reach the prose
+    const prose = result.blocks.filter((b) => b.type === 'p').map((b) => b.text).join(' ');
+    expect(prose).not.toMatch(/\[\d+\]/);
   });
 });

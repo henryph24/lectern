@@ -20,8 +20,16 @@ const SKIP_TAGS = new Set([
 
 export function htmlToBlocks(html) {
   const dom = new JSDOM(html);
+  const body = dom.window.document.body;
+  // Footnote and citation markers are a <sup> wrapping a link (Wikipedia's [1],
+  // [a], [citation needed]). Spoken, they come out as "…1954. two. three. His…".
+  // A superscript with no link (an exponent, an ordinal) is content and stays.
+  // The document is private to this call, so removing nodes is safe.
+  for (const sup of body.querySelectorAll('sup')) {
+    if (sup.querySelector('a')) sup.remove();
+  }
   const blocks = [];
-  walk(dom.window.document.body, blocks);
+  walk(body, blocks);
   return blocks;
 }
 
