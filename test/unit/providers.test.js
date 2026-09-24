@@ -53,6 +53,7 @@ vi.mock('../../server/providers/supertonic/helper.js', () => ({
 import * as edge from '../../server/providers/edge.js';
 import * as elevenlabs from '../../server/providers/elevenlabs.js';
 import * as supertonic from '../../server/providers/supertonic.js';
+import * as kokoro from '../../server/providers/kokoro.js';
 import { getProvider, providers } from '../../server/providers/index.js';
 
 describe('edge provider', () => {
@@ -224,6 +225,7 @@ describe('provider registry', () => {
     expect(getProvider('edge')).toBe(providers.edge);
     expect(getProvider('elevenlabs')).toBe(providers.elevenlabs);
     expect(getProvider('supertonic')).toBe(providers.supertonic);
+    expect(getProvider('kokoro')).toBe(providers.kokoro);
     expect(() => getProvider('nope')).toThrowError(
       expect.objectContaining({ status: 400 }),
     );
@@ -245,6 +247,16 @@ describe('provider registry', () => {
     // inference keeps burning CPU, so a retry would race and slow both attempts)
     expect(providers.supertonic.retryOnTimeout).toBe(false);
     expect(providers.supertonic.timeoutMs).toBeGreaterThanOrEqual(60_000);
+    expect(providers.kokoro).toMatchObject({ timeoutMs: 120_000, retryOnTimeout: false });
+  });
+
+  it('wires kokoro to its provider module', () => {
+    expect(providers.kokoro).toMatchObject({
+      synthesize: kokoro.synthesize,
+      voices: kokoro.voices,
+      isKnownVoice: kokoro.isKnownVoice,
+      available: kokoro.available,
+    });
   });
 
   it('declares how many syntheses may run at once per provider', () => {

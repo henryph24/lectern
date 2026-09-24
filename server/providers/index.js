@@ -1,21 +1,22 @@
 import * as edge from './edge.js';
 import * as elevenlabs from './elevenlabs.js';
 import * as supertonic from './supertonic.js';
+import * as kokoro from './kokoro.js';
 
 // Each provider declares its own synthesis latency profile. Network providers
 // (edge, elevenlabs) return in a few seconds or fail fast, so a tight timeout
-// with retry-on-anything is right. Supertonic is on-device ONNX diffusion —
-// CPU-bound and much slower, especially for long chunks — so it needs a far
-// larger ceiling; and because a timed-out inference is uncancelable and keeps
-// using CPU, it must never be retried on timeout (a second attempt would race
-// the abandoned first one and slow both down). `concurrency` is how many
-// syntheses of one provider run at once; each provider gets its own queue.
-// Network providers overlap well. onnxruntime-node runs each inference step
-// synchronously and yields between steps, so two Supertonic requests
-// interleave step by step and both finish late: one at a time delivers the
-// chunk the listener is waiting on about twice as soon (3.6 s vs 7.4 s
-// measured) for the same total throughput. `timeoutMs`/`retryOnTimeout`/
-// `concurrency` are consumed by routes/tts.js.
+// with retry-on-anything is right. Supertonic (ONNX diffusion) and Kokoro (ONNX
+// StyleTTS 2) run on-device: CPU-bound and much slower, especially for long
+// chunks, so they need a far larger ceiling; and because a timed-out inference
+// is uncancelable and keeps using CPU, they must never be retried on timeout (a
+// second attempt would race the abandoned first one and slow both down).
+// `concurrency` is how many syntheses of one provider run at once; each
+// provider gets its own queue. Network providers overlap well. onnxruntime-node
+// runs each inference step synchronously and yields between steps, so two
+// on-device requests interleave step by step and both finish late: one at a
+// time delivers the chunk the listener is waiting on about twice as soon
+// (3.6 s vs 7.4 s measured for Supertonic) for the same total throughput.
+// `timeoutMs`/`retryOnTimeout`/`concurrency` are consumed by routes/tts.js.
 export const providers = {
   edge: {
     synthesize: edge.synthesize,
@@ -40,6 +41,15 @@ export const providers = {
     voices: supertonic.voices,
     isKnownVoice: supertonic.isKnownVoice,
     available: supertonic.available,
+    timeoutMs: 120_000,
+    retryOnTimeout: false,
+    concurrency: 1,
+  },
+  kokoro: {
+    synthesize: kokoro.synthesize,
+    voices: kokoro.voices,
+    isKnownVoice: kokoro.isKnownVoice,
+    available: kokoro.available,
     timeoutMs: 120_000,
     retryOnTimeout: false,
     concurrency: 1,

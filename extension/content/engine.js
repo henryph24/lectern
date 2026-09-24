@@ -461,6 +461,7 @@
     addGroup('Edge — free', 'edge', voices.edge?.voices);
     if (voices.elevenlabs?.available) addGroup('ElevenLabs', 'elevenlabs', voices.elevenlabs.voices);
     if (voices.supertonic?.available) addGroup('Supertonic — on-device', 'supertonic', voices.supertonic.voices);
+    if (voices.kokoro?.available) addGroup('Kokoro — on-device', 'kokoro', voices.kokoro.voices);
     const want = `${prefs.provider}:${prefs.voice}`;
     if ([...ui.voice.options].some((o) => o.value === want)) ui.voice.value = want;
   }

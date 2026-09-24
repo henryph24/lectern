@@ -425,6 +425,52 @@ try {
     .evaluate(() => document.querySelector('[data-lectern]')?.shadowRoot?.querySelector('.close')?.click())
     .catch(() => {});
   await stPage.close().catch(() => {});
+
+  // Kokoro on-device voice end-to-end: the same fresh read and shadow-DOM
+  //   voice switch as Supertonic above. Skips if the engine has no Kokoro assets.
+  const kkPage = await browser.newPage();
+  await kkPage.goto(fixtureUrl, { waitUntil: 'networkidle0' });
+  await kkPage.bringToFront();
+  await sw.evaluate(() => globalThis.__lecternStart('page'));
+  await poll(
+    () => kkPage.evaluate(() => Boolean(document.querySelector('[data-lectern]')?.shadowRoot?.querySelector('.bar'))),
+    15_000,
+    'player for kokoro read',
+  );
+  const kkOpt = await poll(
+    () =>
+      kkPage.evaluate(() => {
+        const sel = document.querySelector('[data-lectern]')?.shadowRoot?.querySelector('.voice');
+        if (!sel || sel.options.length === 0) return null;
+        const opt = [...sel.options].find((o) => o.value.startsWith('kokoro:'));
+        return opt ? opt.value : 'absent';
+      }),
+    15_000,
+    'voice picker populated',
+  ).catch(() => 'absent');
+  if (kkOpt === 'absent') {
+    check('extension: Kokoro voice available (SKIPPED — on-device assets absent)', true, 'skip');
+  } else {
+    await kkPage.evaluate((value) => {
+      const sel = document.querySelector('[data-lectern]').shadowRoot.querySelector('.voice');
+      sel.value = value;
+      sel.dispatchEvent(new Event('change'));
+    }, kkOpt);
+    const kkSeen = new Set();
+    for (let i = 0; i < 60 && kkSeen.size < 2; i++) {
+      const w = await kkPage.evaluate(() => {
+        const h = CSS.highlights.get('lectern-word');
+        return h && h.size ? [...h.values()][0].toString() : '';
+      });
+      if (w) kkSeen.add(w);
+      await sleep(500);
+    }
+    check('extension: Kokoro synthesizes + karaoke advances', kkSeen.size >= 2, `${kkOpt}, ${kkSeen.size} words`);
+  }
+  await kkPage
+    .evaluate(() => document.querySelector('[data-lectern]')?.shadowRoot?.querySelector('.close')?.click())
+    .catch(() => {});
+  await kkPage.close().catch(() => {});
 } catch (err) {
   check('extension e2e completed', false, err.message);
 } finally {

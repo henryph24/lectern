@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   edgeSynthesize: vi.fn(),
   edgeVoices: vi.fn(),
   elevenAvailable: vi.fn(() => false),
+  kokoroAvailable: vi.fn(() => false),
+  kokoroVoices: vi.fn(() => []),
   // per-provider synthesis policy, flippable per test (reset in beforeEach)
   edgeTimeoutMs: 20_000,
   edgeRetryOnTimeout: true,
@@ -50,6 +52,12 @@ vi.mock('../../server/providers/index.js', () => {
       isKnownVoice: vi.fn(() => true),
       available: () => false,
     },
+    kokoro: {
+      synthesize: vi.fn(),
+      voices: mocks.kokoroVoices,
+      isKnownVoice: vi.fn(() => true),
+      available: mocks.kokoroAvailable,
+    },
   };
   return {
     providers,
@@ -86,6 +94,8 @@ beforeEach(() => {
     { id: 'en-US-AvaMultilingualNeural', label: 'Ava (en-US)', locale: 'en-US', gender: 'Female' },
   ]);
   mocks.elevenAvailable.mockReturnValue(false);
+  mocks.kokoroAvailable.mockReset().mockReturnValue(false);
+  mocks.kokoroVoices.mockReset().mockReturnValue([]);
   mocks.edgeTimeoutMs = 20_000;
   mocks.edgeRetryOnTimeout = true;
   mocks.edgeConcurrency = 2;
@@ -301,6 +311,22 @@ describe('GET /api/voices', () => {
     expect(res.body.elevenlabs).toMatchObject({ available: false, voices: [] });
     expect(res.body.supertonic).toMatchObject({ available: false, voices: [] });
     expect(mocks.edgeVoices).toHaveBeenCalledWith({ all: false });
+  });
+
+  it('exposes no kokoro voices until its assets are on disk', async () => {
+    const res = await request(app).get('/api/voices');
+    expect(res.status).toBe(200);
+    expect(res.body.kokoro).toMatchObject({ available: false, voices: [] });
+    expect(mocks.kokoroVoices).not.toHaveBeenCalled();
+  });
+
+  it('lists kokoro voices, with its default, once the assets are present', async () => {
+    const heart = { id: 'af_heart', label: 'Kokoro Heart (en-US)', locale: 'en-US', gender: 'Female' };
+    mocks.kokoroAvailable.mockReturnValue(true);
+    mocks.kokoroVoices.mockReturnValue([heart]);
+    const res = await request(app).get('/api/voices');
+    expect(res.status).toBe(200);
+    expect(res.body.kokoro).toEqual({ available: true, voices: [heart], default: 'af_heart' });
   });
 });
 

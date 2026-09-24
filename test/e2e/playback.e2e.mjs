@@ -217,6 +217,43 @@ try {
     check('web: Supertonic synthesizes + karaoke advances', stSeen.size >= 2, `${stVoice}, ${stSeen.size} words`);
   }
   await page.evaluate((id) => fetch(`/api/docs/${id}`, { method: 'DELETE' }), stHash.replace('#/doc/', ''));
+
+  // Kokoro on-device voice: same flow as Supertonic above, on its own doc.
+  //   Word timings come from the model's phoneme durations, so the karaoke
+  //   highlight must advance. Skips if the engine has no Kokoro assets.
+  await page.evaluate(() => { location.hash = '#/'; });
+  await waitFor(page, () => document.querySelector('[data-tab="text"]'), 8_000, 'library view');
+  await page.click('[data-tab="text"]');
+  await page.type('[data-form="text"] input[name="title"]', 'E2E Kokoro Doc');
+  await page.type(
+    '[data-form="text"] textarea',
+    'Kokoro reads this sentence aloud on the device. A second sentence follows so the highlight has room to move.',
+  );
+  await page.click('[data-form="text"] .btn');
+  await waitFor(page, () => location.hash.startsWith('#/doc/'), 10_000, 'kokoro reader route');
+  await waitFor(page, () => document.querySelectorAll('.sent').length >= 2, 5_000, 'kokoro sentence spans');
+  const kkHash = await page.evaluate(() => location.hash);
+  const kkVoice = await page.evaluate(() => {
+    const sel = document.getElementById('voice-select');
+    const opt = [...sel.options].find((o) => o.value.startsWith('kokoro:'));
+    if (!opt) return null;
+    sel.value = opt.value;
+    sel.dispatchEvent(new Event('change'));
+    return opt.value;
+  });
+  if (!kkVoice) {
+    check('web: Kokoro voice available (SKIPPED — on-device assets absent)', true, 'skip');
+  } else {
+    await page.evaluate(() => document.getElementById('btn-play').click()); // fresh doc → wantPlay was false
+    const kkSeen = new Set();
+    for (let i = 0; i < 60 && kkSeen.size < 2; i++) {
+      const w = await page.evaluate(() => document.querySelector('.w.is-active')?.textContent ?? '');
+      if (w) kkSeen.add(w);
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    check('web: Kokoro synthesizes + karaoke advances', kkSeen.size >= 2, `${kkVoice}, ${kkSeen.size} words`);
+  }
+  await page.evaluate((id) => fetch(`/api/docs/${id}`, { method: 'DELETE' }), kkHash.replace('#/doc/', ''));
 } catch (err) {
   check('e2e run completed', false, err.message);
 } finally {
