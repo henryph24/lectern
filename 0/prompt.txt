@@ -1,0 +1,1 @@
+Improve the UI of the triggering states and the main windows. Should follow Neural Expressive design by Google
