@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { providers } from '../providers/index.js';
 import { DEFAULT_VOICE } from '../providers/edge.js';
+import { DEFAULT_VOICE as KOKORO_DEFAULT_VOICE } from '../providers/kokoro.js';
 
 export const voicesRouter = Router();
 
@@ -23,6 +24,9 @@ voicesRouter.get('/', async (req, res, next) => {
     const supertonicReady = providers.supertonic.available();
     const supertonicVoices = supertonicReady ? await providers.supertonic.voices() : [];
 
+    const kokoroReady = providers.kokoro.available();
+    const kokoroVoices = kokoroReady ? await providers.kokoro.voices() : [];
+
     res.json({
       edge: { voices: edgeVoices, default: DEFAULT_VOICE },
       elevenlabs: {
@@ -34,6 +38,11 @@ voicesRouter.get('/', async (req, res, next) => {
         available: supertonicReady && supertonicVoices.length > 0,
         voices: supertonicVoices,
         default: 'M1',
+      },
+      kokoro: {
+        available: kokoroReady && kokoroVoices.length > 0,
+        voices: kokoroVoices,
+        default: KOKORO_DEFAULT_VOICE,
       },
     });
   } catch (err) {

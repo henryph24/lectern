@@ -49,7 +49,7 @@ async function loadVoices() {
     voicesData = await api.voices();
   } catch (err) {
     toast(`Could not load voices: ${err.message}`, 'error');
-    voicesData = { edge: { voices: [], default: 'en-US-AvaMultilingualNeural' }, elevenlabs: { available: false, voices: [] }, supertonic: { available: false, voices: [] } };
+    voicesData = { edge: { voices: [], default: 'en-US-AvaMultilingualNeural' }, elevenlabs: { available: false, voices: [] }, supertonic: { available: false, voices: [] }, kokoro: { available: false, voices: [] } };
   }
 
   voiceSelect.innerHTML = '';
@@ -76,6 +76,15 @@ async function loadVoices() {
       stGroup.appendChild(option(`supertonic:${v.id}`, v.label));
     }
     voiceSelect.appendChild(stGroup);
+  }
+
+  if (voicesData.kokoro?.available && voicesData.kokoro.voices.length) {
+    const kkGroup = document.createElement('optgroup');
+    kkGroup.label = 'Kokoro — on-device';
+    for (const v of voicesData.kokoro.voices) {
+      kkGroup.appendChild(option(`kokoro:${v.id}`, v.label));
+    }
+    voiceSelect.appendChild(kkGroup);
   }
 
   const stored = localStorage.getItem(VOICE_KEY);
@@ -485,6 +494,10 @@ function escapeHtml(s) {
 }
 
 /* ——— boot ——— */
+
+// The desktop shell hides its title bar, so the masthead becomes the drag
+// strip and must clear the traffic lights (see .is-desktop in style.css).
+if (navigator.userAgent.includes('Electron')) document.documentElement.classList.add('is-desktop');
 
 await loadVoices();
 route();

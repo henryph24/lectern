@@ -49,6 +49,46 @@ export function durationToWords(text, totalSeconds) {
   return words;
 }
 
+// Kokoro times whole G2P tokens: `spans` tile the text in order, each a
+// [charStart, charEnd) range timed by the speech it produced ([startMs, endMs],
+// or null times when it produced none). Every word-like segment of the ORIGINAL
+// text takes the time of the span holding it, so char offsets are exact by
+// construction. A span holding several words ("well-known") shares its time in
+// proportion to their char offsets. Words in a silent span are dropped: there
+// is nothing to highlight. Speech in a span with no word-like segment keeps its
+// place in time with charStart -1, as edgeBoundariesToWords does.
+export function spansToWords(text, spans) {
+  const segments = [...wordSegmenter.segment(text)].filter((s) => s.isWordLike);
+  const words = [];
+  let next = 0;
+  for (const span of spans) {
+    const inside = [];
+    while (next < segments.length && segments[next].index < span.charEnd) {
+      if (segments[next].index >= span.charStart) inside.push(segments[next]);
+      next++;
+    }
+    if (span.startMs == null) continue;
+    if (!inside.length) {
+      words.push({
+        text: text.slice(span.charStart, span.charEnd).trim(),
+        startMs: Math.round(span.startMs),
+        endMs: Math.round(span.endMs),
+        charStart: -1,
+        charEnd: -1,
+      });
+      continue;
+    }
+    const first = inside[0].index;
+    const width = inside.at(-1).index + inside.at(-1).segment.length - first;
+    const at = (charOffset) => Math.round(span.startMs + ((charOffset - first) / width) * (span.endMs - span.startMs));
+    for (const { segment, index } of inside) {
+      const charEnd = index + segment.length;
+      words.push({ text: segment, startMs: at(index), endMs: at(charEnd), charStart: index, charEnd });
+    }
+  }
+  return words;
+}
+
 // ElevenLabs `alignment` covers the original input text char-by-char, so segment
 // indices double as chunk char offsets.
 export function elevenAlignmentToWords(alignment) {

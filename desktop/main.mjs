@@ -205,6 +205,10 @@ function createWindow() {
     minHeight: 520,
     title: 'Lectern',
     backgroundColor: '#f4eee1',
+    // Content runs under the title bar; the web client pads its masthead and
+    // marks it as the drag region (html.is-desktop in public/style.css).
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 18, y: 20 },
     // Stated explicitly (all are today's defaults) so a future Electron major
     // cannot quietly change the posture: the renderer is a plain web client of
     // the local engine and needs no Node, no shared context, no relaxed

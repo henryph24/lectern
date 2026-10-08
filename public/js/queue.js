@@ -31,10 +31,13 @@ export function createQueue({ chunks, provider, voice, onReady, onError }) {
 
   function fetchChunk(idx) {
     inFlight++;
-    const entry = { status: 'fetching' };
+    // dispose() aborts what is still in flight: the engine then drops an
+    // abandoned request that is still waiting for a synthesis slot, so a voice
+    // switch frees it for the new voice
+    const entry = { status: 'fetching', abort: new AbortController() };
     entries.set(idx, entry);
     api
-      .tts(provider, voice, chunks[idx].text)
+      .tts(provider, voice, chunks[idx].text, { signal: entry.abort.signal })
       .then(({ audioBase64, words }) => {
         if (disposed) return;
         const bytes = Uint8Array.from(atob(audioBase64), (c) => c.charCodeAt(0));
@@ -73,6 +76,7 @@ export function createQueue({ chunks, provider, voice, onReady, onError }) {
     dispose() {
       disposed = true;
       for (const [, entry] of entries) {
+        entry.abort.abort();
         if (entry.blobUrl) URL.revokeObjectURL(entry.blobUrl);
       }
       entries.clear();

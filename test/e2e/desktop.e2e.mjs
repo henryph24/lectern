@@ -125,6 +125,28 @@ try {
     check('desktop: Supertonic synthesizes + karaoke advances', stSeen.size >= 2, `${stVoice}, ${stSeen.size} words`);
   }
 
+  // Kokoro on-device voice, same switch-while-playing flow as Supertonic
+  //   above. Skips if the engine has no Kokoro assets.
+  const kkVoice = await page.evaluate(() => {
+    const sel = document.getElementById('voice-select');
+    const opt = sel && [...sel.options].find((o) => o.value.startsWith('kokoro:'));
+    if (!opt) return null;
+    sel.value = opt.value;
+    sel.dispatchEvent(new Event('change'));
+    return opt.value;
+  });
+  if (!kkVoice) {
+    check('desktop: Kokoro voice available (SKIPPED — on-device assets absent)', true, 'skip');
+  } else {
+    const kkSeen = new Set();
+    for (let i = 0; i < 60 && kkSeen.size < 2; i++) {
+      const w = await page.evaluate(() => document.querySelector('.w.is-active')?.textContent ?? '');
+      if (w) kkSeen.add(w);
+      await sleep(500);
+    }
+    check('desktop: Kokoro synthesizes + karaoke advances', kkSeen.size >= 2, `${kkVoice}, ${kkSeen.size} words`);
+  }
+
   // — OCR: import a scanned (image-only) PDF through the packaged engine. This
   //   is the only check that exercises the bundled @napi-rs/canvas + tesseract.js
   //   loading from app.asar.unpacked — the packaging risk dev mode can't catch.

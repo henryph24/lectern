@@ -56,6 +56,7 @@
     "e2e:desktop": "node test/e2e/desktop.e2e.mjs",
     "verify:all": "npm test && npm run e2e && npm run e2e:extension && npm run e2e:desktop",
     "fetch:supertonic": "node scripts/fetch-supertonic.mjs",
+    "fetch:kokoro": "node scripts/fetch-kokoro.mjs",
     "icons": "node scripts/make-icons.mjs",
     "desktop": "electron desktop/main.mjs",
     "dist:mac": "electron-builder --mac dir"

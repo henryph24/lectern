@@ -45,15 +45,16 @@ There is no Lectern backend anywhere on the internet.
 
 The server binds to loopback (`127.0.0.1`), so nothing on your network can reach it.
 
-**What does leave your machine, and when.** Four things, all of them either the point of the
+**What does leave your machine, and when.** Five things, all of them either the point of the
 feature or a one-time download:
 
 | Traffic | When | How to avoid it |
 | --- | --- | --- |
-| The text being spoken goes to Microsoft Edge TTS | Every read with the default voice | Install the Supertonic voices: synthesis then runs on-device |
+| The text being spoken goes to Microsoft Edge TTS | Every read with the default voice | Install the Supertonic or Kokoro voices: synthesis then runs on-device |
 | The page you import is fetched | Only when you paste a URL | Use the Paste tab |
 | An OCR language file (~15 MB) from a public CDN | Once, on your first scanned PDF | `OCR_ENABLED=0` |
 | Supertonic model weights from Hugging Face | Only when you run `npm run fetch:supertonic` | Do not run it |
+| Kokoro model weights from Hugging Face, and its pronouncing dictionary from GitHub | Only when you run `npm run fetch:kokoro` | Do not run it |
 
 Nothing else is sent anywhere: no analytics, no crash reports, no fonts or scripts from a CDN,
 no sync.
@@ -171,6 +172,19 @@ npm run fetch:supertonic     # ~398 MB of model weights → data/supertonic/
 The voices appear as soon as the download finishes. Synthesis is CPU-bound, so each chunk takes
 a few seconds on a laptop. Nothing leaves your machine.
 
+**Kokoro** (on-device, fully offline). Kokoro-82M v1.0 through ONNX, with nine English voices
+(American and British, picked by the upstream quality grades):
+
+```bash
+npm run fetch:kokoro         # ~333 MB: model, voices, pronouncing dictionary → data/kokoro/
+```
+
+The model predicts how long each phoneme lasts, so every word gets a real timestamp and the
+highlight follows the voice. A 300-character chunk takes about 4 seconds on an M3 Pro (real-time
+factor 0.2). Words are converted to phonemes by a vendored MIT-licensed G2P from
+[HeadTTS](https://github.com/met4citizen/HeadTTS) with a CMUdict-based American-English
+dictionary, so no eSpeak and no GPL code are involved. The weights are Apache-2.0.
+
 **ElevenLabs** (optional, paid, needs a key). Create `.env` from `.env.example`:
 
 ```
@@ -189,7 +203,7 @@ the packaged app):
 - `data/docs/` full documents · `data/meta/` small library summaries · `data/positions/`
   resume-position sidecars
 - `data/cache/` synthesized audio, keyed by voice and text
-- `data/supertonic/` on-device model weights, if you fetched them
+- `data/supertonic/` and `data/kokoro/` on-device model weights, if you fetched them
 - `data/ocr-cache/` the OCR language file, downloaded on the first scanned PDF
 
 The audio cache grows forever by design (a re-listen must be free). A full book in one voice is
@@ -240,7 +254,7 @@ The extension talks to `127.0.0.1:3000` and does nothing on its own.
 **A new route or a UI change does nothing.** Restart `npm start` after server changes, and
 hard-reload the browser tab after frontend changes.
 
-**Playback stalls on a Supertonic voice.** On-device synthesis needs real CPU. If you run the
+**Playback stalls on a Supertonic or Kokoro voice.** On-device synthesis needs real CPU. If you run the
 engine as a background service, make sure it is not pinned to efficiency cores (on macOS
 launchd, use `ProcessType=Standard`).
 
@@ -254,12 +268,13 @@ sites give the extractor no paragraph structure at all. Select the part you want
 
 ```
 server/            Express 5 (Node ≥22, ESM, no build step)
-  providers/       edge.js (edge-tts-universal) · elevenlabs.js · supertonic.js (on-device ONNX)
+  providers/       edge.js (edge-tts-universal) · elevenlabs.js · supertonic.js and kokoro.js
+                   (on-device ONNX; kokoro/ holds the vendored HeadTTS G2P)
                    uniform {audio, format, words[{text,startMs,endMs,charStart,charEnd}]}
   lib/segment.js   Intl.Segmenter sentences → ≤300-char chunks (never split a sentence,
                    never cross a paragraph)
   lib/words.js     Edge word-boundary → char-range matcher · ElevenLabs char alignment ·
-                   proportional char→time map for Supertonic
+                   proportional char→time map for Supertonic · G2P span timing for Kokoro
   lib/extract/     Readability+jsdom (URL) · unpdf (PDF: furniture stripping, cross-page
                    stitching, page provenance) · ocr.js (tesseract.js fallback) · text.js
   lib/store.js     docs + meta summaries + position sidecars, legacy self-migration
@@ -284,7 +299,7 @@ extension/         MV3: sw.js owns the session (storage.session, rehydratable) �
 ```bash
 npm run test:unit          # segmentation, word mapping, cache, extraction, routes, storage
 npm run test:integration   # live Edge TTS + live URL extraction (keyless, always runs);
-                           # ElevenLabs and Supertonic tests self-skip until configured
+                           # ElevenLabs, Supertonic and Kokoro tests self-skip until configured
 npm test                   # both
 npm run e2e                # web app in headless Chrome: real playback, karaoke sweep,
                            # chunk handoff, click-to-jump, rate, reload-resume
@@ -307,6 +322,10 @@ npm run verify:all         # everything above, in order
   numbers and abbreviations). Sentence-level highlighting stays in sync by design.
 - Supertonic word timings are proportional to character position, because the model reports one
   total clip duration. Highlighting stays anchored; it drifts slightly inside a long sentence.
+- Kokoro pronounces every voice, British ones included, from an American-English dictionary, and
+  falls back to letter-to-sound rules for unknown words. Some abbreviations come out wrong ("Dr."
+  is read as "drive"), a hyphen between two numbers is read as "minus" ("pages 10-20" becomes
+  "pages ten minus twenty"), and text outside the Latin alphabet is skipped.
 - The audio cache is never pruned automatically.
 - The macOS app is unsigned and built for the machine that builds it. There is no auto-start at
   login (add it to System Settings → Login Items by hand).
@@ -317,10 +336,13 @@ npm run verify:all         # everything above, in order
 `contrib/dev.lectern.engine.plist.example` is a launchd template that keeps the engine
 running in the background. Copy it to `~/Library/LaunchAgents/`, replace the placeholder
 paths, and load it with `launchctl bootstrap`. Keep `ProcessType=Standard`: `Background`
-pins the process to efficiency cores, which starves on-device Supertonic synthesis.
+pins the process to efficiency cores, which starves on-device Supertonic and Kokoro synthesis.
 
 ## License
 
 MIT: see [LICENSE](LICENSE). Supertonic model weights are OpenRAIL-M licensed and are
 downloaded from Hugging Face by `npm run fetch:supertonic` (pinned to one revision and
-verified by sha256); the vendored `helper.js` is MIT.
+verified by sha256); the vendored `helper.js` is MIT. Kokoro-82M weights and voices are
+Apache-2.0 and are downloaded by `npm run fetch:kokoro`, pinned and verified the same way,
+together with HeadTTS's CMUdict-derived dictionary (BSD-style CMU license); the vendored G2P
+in `server/providers/kokoro/` is MIT (notice in its `LICENSE`).

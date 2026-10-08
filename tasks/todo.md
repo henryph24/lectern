@@ -1,5 +1,127 @@
 # Speechify Clone — Build Checklist
 
+## Round 11 (2026-09-24): Kokoro-82M on-device provider with per-phoneme word timing
+
+Goal: add Kokoro-82M v1.0 (Apache-2.0, ONNX) as a fourth TTS provider behind the same
+`{audio, format:'mp3', words}` contract, on all three surfaces. Supertonic reports one duration
+per clip, so its word timings are proportional; Kokoro reports one duration per phoneme token,
+so every word gets a measured timestamp. G2P comes from HeadTTS (MIT) with a CMUdict-derived
+dictionary, which keeps eSpeak and GPL code out of the dependency tree.
+
+- [x] `scripts/fetch-kokoro.mjs` + npm `fetch:kokoro`: 12 files (~333 MB) pinned to immutable
+      revisions with a sha256 each; streaming hash, promote on match, re-hash on skip, `--force`,
+      startup failure on an unpinned file. Destination `data/kokoro` or `$KOKORO_DIR`.
+- [x] Vendor the HeadTTS G2P byte for byte → `server/providers/kokoro/` (MIT header + LICENSE)
+- [x] `server/providers/kokoro.js`: closed voice allowlist (hasOwnProperty) before any path is
+      built; lazy onnxruntime import; cached session, dictionary, vocabulary, voice tables;
+      failed loads retried; 510-token context split at sentence, then word boundaries
+- [x] `server/lib/words.js`: `spansToWords` (timed G2P spans → words, char offsets in the
+      original chunk text via Intl.Segmenter)
+- [x] Register in `providers/index.js` (120 s, no retry on timeout) + `routes/voices.js`
+- [x] Web picker (`public/js/main.js`) + extension picker (`extension/content/engine.js`)
+- [x] Self-skipping Kokoro checks in the web, extension and desktop e2e suites
+- [x] Unit tests (mocked onnxruntime, real G2P on a tiny dictionary) + live test on the model
+- [x] README (setup, privacy table, limitations, licensing) + SECURITY.md (pinned weights)
+- [x] e2e suites run: web 14/14, extension 31/31 (cold and warm cache), desktop 8/8
+- [x] Extension voice switch to an on-device voice (see the follow-up below)
+
+### Round-11 review / lessons
+
+**Verification**: 278 passed, 1 skipped (ElevenLabs: no `.env` on this machine), up from 229
+passed, 1 skipped. The Kokoro live test ran against the real weights (2/2). Real-model probes:
+all 9 voices synthesize (14/14 words each); 10 edge inputs (punctuation only, a lone dash,
+emoji, a 30-digit number, a URL, curly quotes, accents, a newline, an 835-char sentence) all
+produce in-order timings that slice back to their words; two concurrent cold calls return
+audio byte-identical to sequential calls. Fetch script: re-run verifies 12/12 by re-hash, a
+wrong digest leaves no file behind, an unpinned file fails before any download.
+
+**Adversarial review** (Opus, fresh context) found 1 major, 3 minor, 1 nit, all reproduced:
+- Fixed (major): numbers below 1e-6 or with 309+ digits overflowed the stack in the vendored
+  number reader, so the chunk failed on every retry. A subclass now reads written numbers
+  digit for digit. Fuzz, 6000 generated inputs: the vendored G2P alone threw on 380 and spoke
+  "undefined" on 127; through the provider, 0 and 0.
+- Fixed: punctuation-only chunks reached the model, which ended "…" in a 0.100 RMS burst;
+  they now play 300 ms of silence.
+- Documented: "10-20" is read as "ten minus twenty" (vendored G2P).
+- Left for a follow-up (shared with Supertonic): onnxruntime-node runs inference synchronously
+  on the main thread; the event loop froze for 3094 ms of a 3095 ms synthesis.
+- Added: tests for a shared first load, a retried failed load and a malformed voice file
+  (each killed its mutant).
+
+**Measurements** (M3 Pro, CPU, fp32): model load 0.63 s warm / 2.30 s cold; RTF median 0.200
+on a 296-char chunk (3.83 s for 19.10 s of audio); engine RSS +789 to +842 MB after the first
+synthesis (Supertonic: +696 MB). Turning off the onnxruntime CPU arena raised RSS (2041 MB
+after a 500-token run, against 980 MB with the default), so the defaults stay.
+
+**Lessons**:
+- `durations` holds the predictor's floats before rounding; the decoder renders
+  max(1, round-half-even(d)) frames of 600 samples per token. When those rounded frames sum to
+  the waveform length (every probe so far), they give sample-exact word edges; stretching the
+  floats over the real audio length is the fallback.
+- The HeadTTS G2P drops every character it has no rule for, U+2019 included, so "we’re" was
+  read as "were" and "I’ll" as "ill". Swap such characters one-for-one before G2P so char
+  offsets stay valid in the original text.
+- "Nothing to voice" means no token other than a space: "日本 語" leaves one space token, and
+  the first guard (empty token list) let it through to a 768-byte, near-empty mp3. A failing
+  test caught it. Pauses alone are also nothing to voice (the model fills them with noise), so
+  the guard now asks for a speech token.
+- The vendored reader round-trips written digits through a double; `String(1e-8)` has no '.',
+  and its decimal branch recursed on the same string forever. Read numbers from the written
+  text, and fuzz a vendored parser before trusting it.
+
+**Follow-ups (not done)**: run `npm run verify:all` (stop the launchd engine agent first);
+move on-device inference to a worker thread, and stop a timed-out chunk between pieces; in the
+desktop e2e voice switches (Supertonic and Kokoro), the previous voice's word can count as one
+of the two highlights;
+the packaged desktop sets neither `SUPERTONIC_DIR` nor `KOKORO_DIR`, so both on-device
+providers stay unavailable in a packaged app that starts its own engine (pre-existing, Round 6);
+the American-English dictionary serves the British voices too, "Dr." is read as "drive", and
+text outside the Latin alphabet is skipped.
+
+### Round-11 follow-up (2026-09-24): extension voice switch to an on-device voice
+
+**Symptom**: the extension e2e Kokoro check failed 3 of 3 overnight runs (no highlighted word
+within 30 s of the switch), and the Supertonic check could pass while no Supertonic audio
+played: highlights kept moving while the service worker's position stayed at 174 ms.
+
+**Causes**:
+- The offscreen player stopped its old session without aborting its fetches, so the previous
+  voice's prefetched chunks kept the on-device queue and the event loop busy, and the new
+  voice's first chunk waited behind them.
+- The content engine's karaoke clock extrapolated from the last `time` update while nothing
+  played, so the highlight swept through words nobody heard, and the check counted them.
+
+**Fix**:
+- [x] `extension/offscreen.js` `stop()` and `public/js/queue.js` `dispose()` abort every
+      in-flight `/api/tts` fetch (`api.tts` takes a `signal`). The engine already drops a queued
+      request whose client hung up; a request that is already synthesizing completes and is
+      cached.
+- [x] `extension/content/engine.js`: the clock freezes on any state other than `playing`, and
+      new audio for the chunk it was timing drops it until that audio reports its own time.
+- [x] `checkVoiceSwitch` in the extension e2e: switch after 1.5 s of audio, sample the
+      highlight every 50 ms and on each loading toggle, fail on any movement while loading, and
+      count only new positions heard afterwards.
+- [x] Unit tests for the web queue's abort signals (4)
+
+**Measurements** (M3 Pro, one run each, cache emptied for cold):
+- Original extension code with the new check (cold): the highlight moved through 4 positions
+  while each voice synthesized (2 checks failed, 29/31); first Kokoro audio 7164 ms after the
+  switch from Supertonic, first Supertonic audio 1532 ms after the switch from Edge.
+- Fixed code, cold: 1 position (the highlight held); Kokoro 1248 ms, Supertonic 1539 ms.
+  Warm: 1 position; Kokoro 1534 ms, Supertonic 7 ms. 31/31 in both runs.
+- `npm test` 301 passed, 1 skipped; web e2e 14/14; desktop e2e 8/8.
+
+**Lessons**:
+- A playback check must tie each observation to evidence of real audio (a state transition or
+  a time update). Counting distinct highlighted words passes on a clock that runs by itself.
+- Run a new check against the old code first: the red run is what showed the check sees the
+  phantom sweep.
+
+**Not fixed (flagged)**: a voice switch that lands while the session prepares is lost.
+`onSessionStart` in `extension/sw.js` starts the offscreen player with the `prefs` snapshot it
+read before the picker appeared, and the offscreen `voice` handler ignores a switch that
+arrives before `start`.
+
 ## Round 10 — extension re-click never re-read an SPA (2026-08-24) — DONE
 
 On claude.ai (or any SPA) the first toolbar click read the answer fine, but a follow-up answer
@@ -500,3 +622,21 @@ replace the stale `/Applications/Lectern.app` (June build, no front gate) with t
 `dist/mac-arm64/Lectern.app`; drop the always-on MAIN-world content script in favor of
 on-demand injection before any Web Store submission (it fingerprints Lectern users via
 `window.__lecternCore`); strip the `__lectern*` e2e hooks from a published extension zip.
+
+## Round: Material 3 Expressive UI (2026-10-08)
+
+- [x] Web `public/style.css` rewritten on the M3 Expressive grammar: tonal surface tiers,
+      shape scale (`--shape-*`), spring easings via `linear()` for spatial moves and a
+      non-overshooting ease for color; state is carried by shape (play control circle at
+      rest → rounded square while reading → tonal square with a morphing loader while
+      synthesizing; wavy progress line while audio plays; `.player-state` chip reads
+      Paused / Reading / Synthesizing). Connected button groups for tabs and prev/next,
+      filled text fields, tonal library cards, snackbar toasts.
+- [x] Extension `UI_CSS` mirrors the same states (`.bar.playing`, `.bar.loading`, `.status.err`);
+      prev/next grouped in `.group`; built with createElement only (Trusted Types fixture).
+- [x] Desktop: `titleBarStyle: 'hiddenInset'`; the web client adds `html.is-desktop` under
+      Electron so the masthead becomes the drag strip and clears the traffic lights.
+
+**Verification**: unit 293/293; web e2e 14/14; extension e2e 33/33; desktop e2e 8/8 (dev
+electron). Screenshots of paused / loading / playing states checked by eye.
+**Not done**: `npm run dist:mac` not rebuilt, so the packaged app still has the old title bar.

@@ -128,6 +128,14 @@ node scripts/generate-logo.mjs   # brand concepts via Gemini image API (.env key
 - Offscreen documents with `AUDIO_PLAYBACK` are closed by Chrome after ~30 s without
   audio (verified in e2e). Anything stateful must live in the SW session and be
   rehydratable; the server-side audio cache makes rehydration cheap.
+- The extension karaoke clock (`engine.js` `tick()`) extrapolates from the last offscreen
+  `time` update, and no audio plays while a chunk synthesizes (a voice switch, a slow next
+  chunk). So it freezes on any state other than `playing`, and new audio for the chunk it was
+  timing drops it until that audio reports its own time. A free-running clock sweeps the
+  highlight through words nobody hears, and an e2e check that counts distinct words passes on
+  it. A voice switch or a stop aborts every in-flight `/api/tts` fetch (offscreen `stop()`, web
+  `queue.dispose()`), so the engine drops the old voice's queued requests and the new voice's
+  first chunk does not wait behind them.
 - The always-on engine runs as a launchd agent
   (`~/Library/LaunchAgents/dev.hungpq.lectern.engine.plist`). It **must** use
   `ProcessType=Standard` (or `Interactive`), never `Background`: on Apple Silicon

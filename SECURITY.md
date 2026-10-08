@@ -58,10 +58,11 @@ vulnerability.
   the service worker, and a page-originated "read this" gesture is honored only
   against a short-lived arm that a real toolbar click created.
 - **On-device model weights are third-party binaries** parsed in-process by
-  `onnxruntime-node`. `scripts/fetch-supertonic.mjs` pins an immutable Hugging
-  Face commit sha and verifies every file's sha256 before it is promoted into
-  `data/supertonic/`. Fetching those weights by any other route skips that
-  check.
+  `onnxruntime-node`. `scripts/fetch-supertonic.mjs` and
+  `scripts/fetch-kokoro.mjs` pin an immutable commit sha for every source and
+  verify every file's sha256 before it is promoted into `data/supertonic/` or
+  `data/kokoro/` (Kokoro's pronouncing dictionary included). Fetching those
+  files by any other route skips that check.
 - **Content you import is untrusted input.** URL and PDF extraction runs over
   attacker-controlled bytes through `jsdom`, `@mozilla/readability`, `unpdf`
   and `tesseract.js`; a parser bug reachable that way is in scope.
