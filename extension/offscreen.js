@@ -24,7 +24,12 @@ function stop() {
   clearInterval(s.timeTimer);
   s.active.pause();
   s.standby.pause();
-  for (const [, e] of s.entries) if (e.blobUrl) URL.revokeObjectURL(e.blobUrl);
+  for (const [, e] of s.entries) {
+    // the engine drops an abandoned request that is still waiting for a
+    // synthesis slot, so a voice switch or a stop frees it at once
+    e.abort.abort();
+    if (e.blobUrl) URL.revokeObjectURL(e.blobUrl);
+  }
   s = null;
 }
 
@@ -64,12 +69,13 @@ function ensureWindow() {
 function fetchChunk(idx) {
   const mySession = s;
   mySession.inFlight++;
-  const entry = { status: 'fetching' };
+  const entry = { status: 'fetching', abort: new AbortController() };
   mySession.entries.set(idx, entry);
   fetch(`${API}/api/tts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ provider: mySession.provider, voice: mySession.voice, text: mySession.chunks[idx].text }),
+    signal: entry.abort.signal,
   })
     .then(async (res) => {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `TTS failed (${res.status})`);

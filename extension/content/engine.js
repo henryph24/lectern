@@ -508,6 +508,12 @@
         live.sync = { idx: msg.idx, ms: msg.ms, rate: msg.rate, playing: msg.playing, recvAt: performance.now() };
         break;
       case 'state':
+        // No audio plays in any state but 'playing' (a chunk synthesizing after
+        // a voice switch, a pause, an error), and running the clock on from the
+        // last time update would sweep the highlight through words nobody
+        // hears. Hold the highlight where it stands until the audio reports its
+        // time again.
+        if (live && msg.state !== 'playing') live.sync = null;
         if (msg.state === 'playing') setStatus('playing', 'Reading aloud');
         else if (msg.state === 'paused') setStatus('paused', 'Paused');
         else if (msg.state === 'loading') setStatus('loading', 'Synthesizing…');

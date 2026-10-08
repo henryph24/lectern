@@ -27,8 +27,8 @@ export const api = {
 
   voices: () => fetch('/api/voices').then(handle),
 
-  tts: (provider, voice, text) =>
-    fetch('/api/tts', { method: 'POST', headers: json, body: JSON.stringify({ provider, voice, text }) }).then(handle),
+  tts: (provider, voice, text, { signal } = {}) =>
+    fetch('/api/tts', { method: 'POST', headers: json, body: JSON.stringify({ provider, voice, text }), signal }).then(handle),
 
   listDocs: () => fetch('/api/docs').then(handle),
 
