@@ -622,3 +622,21 @@ replace the stale `/Applications/Lectern.app` (June build, no front gate) with t
 `dist/mac-arm64/Lectern.app`; drop the always-on MAIN-world content script in favor of
 on-demand injection before any Web Store submission (it fingerprints Lectern users via
 `window.__lecternCore`); strip the `__lectern*` e2e hooks from a published extension zip.
+
+## Round: Material 3 Expressive UI (2026-10-08)
+
+- [x] Web `public/style.css` rewritten on the M3 Expressive grammar: tonal surface tiers,
+      shape scale (`--shape-*`), spring easings via `linear()` for spatial moves and a
+      non-overshooting ease for color; state is carried by shape (play control circle at
+      rest → rounded square while reading → tonal square with a morphing loader while
+      synthesizing; wavy progress line while audio plays; `.player-state` chip reads
+      Paused / Reading / Synthesizing). Connected button groups for tabs and prev/next,
+      filled text fields, tonal library cards, snackbar toasts.
+- [x] Extension `UI_CSS` mirrors the same states (`.bar.playing`, `.bar.loading`, `.status.err`);
+      prev/next grouped in `.group`; built with createElement only (Trusted Types fixture).
+- [x] Desktop: `titleBarStyle: 'hiddenInset'`; the web client adds `html.is-desktop` under
+      Electron so the masthead becomes the drag strip and clears the traffic lights.
+
+**Verification**: unit 293/293; web e2e 14/14; extension e2e 33/33; desktop e2e 8/8 (dev
+electron). Screenshots of paused / loading / playing states checked by eye.
+**Not done**: `npm run dist:mac` not rebuilt, so the packaged app still has the old title bar.

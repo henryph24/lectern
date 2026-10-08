@@ -495,5 +495,9 @@ function escapeHtml(s) {
 
 /* ——— boot ——— */
 
+// The desktop shell hides its title bar, so the masthead becomes the drag
+// strip and must clear the traffic lights (see .is-desktop in style.css).
+if (navigator.userAgent.includes('Electron')) document.documentElement.classList.add('is-desktop');
+
 await loadVoices();
 route();

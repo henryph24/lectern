@@ -282,33 +282,62 @@
 
   /* ——— floating UI (shadow DOM) ——— */
 
+  // Material 3 Expressive floating toolbar, mirrored from public/style.css:
+  // the play control is a circle at rest and a rounded square while reading,
+  // a tonal square holding a morphing shape while audio synthesizes; the
+  // status is a chip whose tone follows the state; spatial transitions use
+  // spring easings, color transitions never overshoot.
   const UI_CSS = `
     :host { all: initial; position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-            z-index: 2147483647; font-family: -apple-system, 'Helvetica Neue', sans-serif; }
-    .bar { display: flex; align-items: center; gap: 10px; background: #211d16; color: #f4eee1;
-           border-radius: 18px; padding: 10px 14px; box-shadow: 0 18px 50px -12px rgba(0,0,0,.55);
-           min-width: 380px; cursor: grab; user-select: none; -webkit-user-select: none;
-           touch-action: none; }
+            z-index: 2147483647; font-family: -apple-system, 'Helvetica Neue', sans-serif;
+            --spring: linear(0, 0.3 6%, 0.66 13%, 0.93 21%, 1.07 30%, 1.09 38%, 1.04 48%, 0.99 60%, 0.985 72%, 1);
+            --spring-fast: linear(0, 0.42 6.6%, 0.78 13.5%, 1.02 21%, 1.11 28.5%, 1.08 36%, 1.01 46%, 0.98 56%, 0.99 68%, 1);
+            --ease: cubic-bezier(0.2, 0, 0, 1); }
+    .bar { display: flex; align-items: center; gap: 8px; background: #211d16; color: #f4eee1;
+           border-radius: 28px; padding: 8px 12px 8px 8px; box-shadow: 0 18px 50px -12px rgba(0,0,0,.55);
+           min-width: 400px; cursor: grab; user-select: none; -webkit-user-select: none;
+           touch-action: none; animation: in .5s var(--spring) both; }
     .bar.dragging { cursor: grabbing; }
-    button { all: unset; cursor: pointer; display: grid; place-items: center; border-radius: 50%;
-             width: 34px; height: 34px; color: #f4eee1; font-size: 15px; line-height: 1; }
-    button:hover { background: #383226; }
-    .play { width: 42px; height: 42px; background: #c8401f; font-size: 17px; }
-    .play:hover { background: #d8512e; }
-    .status { flex: 1; min-width: 0; font-size: 12px; color: #9b9077; white-space: nowrap;
-              overflow: hidden; text-overflow: ellipsis; }
-    .status.err { color: #e8927c; }
-    .rate { display: flex; align-items: center; gap: 2px; background: #383226; border-radius: 999px;
-            padding: 2px 4px; }
-    .rate button { width: 24px; height: 24px; font-size: 13px; }
-    .rate span { font-size: 12px; min-width: 30px; text-align: center; font-variant-numeric: tabular-nums; }
-    select { all: unset; background: #383226; border-radius: 999px; padding: 7px 12px; font-size: 12px;
-             max-width: 110px; text-overflow: ellipsis; overflow: hidden; cursor: pointer; }
-    .spin { width: 16px; height: 16px; border: 2px solid rgba(244,238,225,.3); border-top-color: #f4eee1;
-            border-radius: 50%; animation: spin .8s linear infinite; display: none; }
+    button { all: unset; cursor: pointer; display: grid; place-items: center; border-radius: 999px;
+             width: 36px; height: 36px; color: #f4eee1; font-size: 15px; line-height: 1; box-sizing: border-box;
+             transition: background .2s var(--ease), border-radius .4s var(--spring), transform .4s var(--spring-fast); }
+    button:hover { background: #4a4232; border-radius: 14px; }
+    button:active { transform: scale(.88); }
+    .play { width: 48px; height: 48px; background: #c8401f; font-size: 18px; }
+    .play:hover { background: #e0532d; }
+    .play:active { transform: scale(.9); }
+    .playing .play { border-radius: 14px; }
+    .loading .play { border-radius: 18px; background: #4a4232; cursor: progress; }
+    .group { display: flex; gap: 3px; padding: 3px; background: #352f24; border-radius: 999px; }
+    .group button { width: 32px; height: 32px; font-size: 13px; }
+    .status { flex: 1; min-width: 0; font-size: 11px; font-weight: 600; letter-spacing: .08em;
+              text-transform: uppercase; color: #a69b80; white-space: nowrap; overflow: hidden;
+              text-overflow: ellipsis; padding: 5px 10px; border-radius: 10px; background: #352f24;
+              box-sizing: border-box; transition: background .2s var(--ease), color .2s var(--ease),
+              border-radius .4s var(--spring); }
+    .playing .status { background: #c8401f; color: #fff6ec; border-radius: 999px; }
+    .loading .status { background: #4a4232; color: #f4eee1; }
+    .status.err { background: #f8d7cf; color: #5b1708; text-transform: none; letter-spacing: 0; font-weight: 500; }
+    .rate { display: flex; align-items: center; gap: 2px; background: #352f24; border-radius: 999px;
+            padding: 3px; }
+    .rate button { width: 26px; height: 26px; font-size: 13px; }
+    .rate span { font-size: 12px; font-weight: 600; min-width: 32px; text-align: center; font-variant-numeric: tabular-nums; }
+    select { all: unset; background: #352f24; border-radius: 999px; padding: 8px 12px; font-size: 12px;
+             max-width: 110px; text-overflow: ellipsis; overflow: hidden; cursor: pointer; box-sizing: border-box;
+             transition: background .2s var(--ease), border-radius .4s var(--spring); }
+    select:hover { background: #4a4232; border-radius: 14px; }
+    .spin { width: 20px; height: 20px; background: #c8401f; display: none; animation: morph 1.6s linear infinite; }
     .loading .spin { display: block; }
     .loading .playglyph { display: none; }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes morph {
+      0%   { border-radius: 50%; transform: rotate(0deg); }
+      25%  { border-radius: 50% 10%; transform: rotate(90deg); }
+      50%  { border-radius: 22%; transform: rotate(180deg); }
+      75%  { border-radius: 50% 50% 50% 10%; transform: rotate(270deg); }
+      100% { border-radius: 50%; transform: rotate(360deg); }
+    }
+    @keyframes in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
   `;
 
   // MAIN-world code runs under the page's CSP: sites enforcing Trusted Types
@@ -336,10 +365,11 @@
     play.append(el('span', 'playglyph', '⏸'), el('span', 'spin'));
     const rate = el('span', 'rate');
     rate.append(el('button', 'slower', '−'), el('span', 'rateval', '1×'), el('button', 'faster', '+'));
+    const skip = el('span', 'group');
+    skip.append(el('button', 'prev', '⏮', 'Previous sentence'), el('button', 'next', '⏭', 'Next sentence'));
     bar.append(
       play,
-      el('button', 'prev', '⏮', 'Previous sentence'),
-      el('button', 'next', '⏭', 'Next sentence'),
+      skip,
       el('span', 'status', 'Lectern'),
       rate,
       el('select', 'voice', '', 'Voice'),
@@ -439,6 +469,7 @@
     ui.status.textContent = text ?? '';
     ui.status.classList.toggle('err', kind === 'error');
     ui.bar.classList.toggle('loading', kind === 'loading');
+    ui.bar.classList.toggle('playing', kind === 'playing');
     if (kind === 'playing') ui.playGlyph.textContent = '⏸';
     if (kind === 'paused' || kind === 'ended' || kind === 'error') ui.playGlyph.textContent = '▶';
   }
