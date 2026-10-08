@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M4DV3Y73DVFR81D1JPH9VTJM",
+  "strategy": "manual-commit",
+  "branch": "goodnight/20260924-kokoro-provider",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "desktop/main.mjs",
+    "public/index.html",
+    "public/js/main.js",
+    "public/style.css"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1124,
+    "cache_creation_tokens": 137316,
+    "cache_read_tokens": 4794397,
+    "output_tokens": 33554,
+    "api_call_count": 37
+  }
+}

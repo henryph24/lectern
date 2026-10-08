@@ -1,0 +1,42 @@
+{
+  "cli_version": "0.10.3",
+  "checkpoint_id": "01M4DV3Y73DVFR81D1JPH9VTJM",
+  "session_id": "3d9108af-7796-4d16-a006-e9eb966b527f",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-08T13:26:51.672181Z",
+  "branch": "goodnight/20260924-kokoro-provider",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [
+    "desktop/main.mjs",
+    "public/index.html",
+    "public/js/main.js",
+    "public/style.css"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-fable-5-1",
+  "turn_id": "bdc0c8cbb13b",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 1124,
+    "cache_creation_tokens": 137316,
+    "cache_read_tokens": 4794397,
+    "output_tokens": 33554,
+    "api_call_count": 37
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-10-08T13:26:51.547913Z",
+    "agent_lines": 416,
+    "agent_removed": 166,
+    "human_added": 73,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 489,
+    "total_lines_changed": 679,
+    "agent_percentage": 85.71428571428571,
+    "metric_version": 2
+  }
+}
