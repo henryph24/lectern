@@ -1,0 +1,59 @@
+I think the extension at chrome is having serious performance issue. The speech gets itteruptted way too often ultrathink
+
+---
+
+<task-notification>
+<task-id>b7ergv6zn</task-id>
+<tool-use-id>toolu_01GBiJF51toBhHu2nYyg6LiT</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-hungpq2412-lectern/931908f8-a19b-4e77-9e01-97dc8fe86fb4/tasks/b7ergv6zn.output</output-file>
+<status>failed</status>
+<summary>Background command "Start dev engine from this checkout" failed with exit code 143</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bvmvi37hw</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-hungpq2412-lectern/931908f8-a19b-4e77-9e01-97dc8fe86fb4/tasks/bvmvi37hw.output</output-file>
+<status>failed</status>
+<summary>Background command "Trace SW calls during rebuild" failed with exit code 144</summary>
+</task-notification>
+
+---
+
+continue where we left off
+
+---
+
+continue where we left off
+
+---
+
+<task-notification>
+<task-id>blnlltsqu</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-hungpq2412-lectern/931908f8-a19b-4e77-9e01-97dc8fe86fb4/tasks/blnlltsqu.output</output-file>
+<status>failed</status>
+<summary>Background command "Start dev engine with changes" failed with exit code 143</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>blo3ivgx3</task-id>
+<tool-use-id>toolu_01HhpF9iJNJE9Ei8LUfofHxZ</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-hungpq2412-lectern/931908f8-a19b-4e77-9e01-97dc8fe86fb4/tasks/blo3ivgx3.output</output-file>
+<status>failed</status>
+<summary>Background command "Start engine on baseline code" failed with exit code 143</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b657pod37</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-hungpq2412-lectern/931908f8-a19b-4e77-9e01-97dc8fe86fb4/tasks/b657pod37.output</output-file>
+<status>failed</status>
+<summary>Background command "Start engine with the fix for e2e" failed with exit code 143</summary>
+</task-notification>
