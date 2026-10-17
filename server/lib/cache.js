@@ -2,8 +2,12 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 
-export function cacheKey(provider, voice, text) {
-  return createHash('sha256').update(JSON.stringify([provider, voice, text])).digest('hex');
+// `variant` names a non-default synthesis of the same text (fewer Supertonic
+// denoising steps). The default keeps the original key, so audio cached before
+// variants existed is still found.
+export function cacheKey(provider, voice, text, variant = null) {
+  const fields = variant == null ? [provider, voice, text] : [provider, voice, text, variant];
+  return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
 }
 
 export function createCache(dir) {

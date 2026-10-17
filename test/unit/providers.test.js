@@ -212,6 +212,19 @@ describe('supertonic provider', () => {
     expect(res.words[0].charStart).toBe(0);
     expect(res.words.at(-1).endMs).toBeLessThanOrEqual(500);
     expect(fakeSt.call).toHaveBeenCalledWith('Hello there world.', 'en', expect.anything(), 8, 1.0);
+    expect(res.durationMs).toBe(500);
+  });
+
+  it('runs the denoising steps it is given, within its declared range', async () => {
+    fakeSt.loadTextToSpeech.mockResolvedValue({ sampleRate: 44100, call: fakeSt.call });
+    fakeSt.loadVoiceStyle.mockReturnValue({ ttl: { dims: [1] } });
+    fakeSt.call.mockResolvedValue({ wav: new Float32Array(4410), duration: [0.1] });
+    for (const [asked, ran] of [[4, 4], [2, 2], [1, 2], [20, 8]]) {
+      fakeSt.call.mockClear();
+      await supertonic.synthesize({ text: 'Paced.', voice: 'M1', steps: asked });
+      expect(fakeSt.call).toHaveBeenCalledWith('Paced.', 'en', expect.anything(), ran, 1.0);
+    }
+    expect(providers.supertonic.steps).toEqual({ min: 2, max: 8 });
   });
 
   it('rejects an unknown voice with status 400', async () => {

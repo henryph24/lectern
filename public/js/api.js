@@ -27,8 +27,14 @@ export const api = {
 
   voices: () => fetch('/api/voices').then(handle),
 
-  tts: (provider, voice, text, { signal } = {}) =>
-    fetch('/api/tts', { method: 'POST', headers: json, body: JSON.stringify({ provider, voice, text }), signal }).then(handle),
+  // `rate` is the listener's playback rate: the engine paces on-device synthesis by it
+  tts: (provider, voice, text, { signal, rate } = {}) =>
+    fetch('/api/tts', {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ provider, voice, text, rate }),
+      signal,
+    }).then(handle),
 
   listDocs: () => fetch('/api/docs').then(handle),
 

@@ -228,6 +228,55 @@ try {
   );
   check('clicking page text jumps audio to that sentence', Boolean(jumped), `"${jumped?.slice(0, 50)}…"`);
 
+  // — Chrome closes the offscreen player after 30 s without audio, also while a
+  //   slow on-device chunk synthesizes. Mid-session the service worker must
+  //   rebuild it and read on; before, the page sat on "Synthesizing…" for good.
+  const wordNow = () =>
+    page.evaluate(() => {
+      const h = CSS.highlights.get('lectern-word');
+      return h && h.size ? [...h.values()][0].toString() : null;
+    });
+  // The jump's seek may still be in flight, and a seek that finds no player
+  // rehydrates one, which would pass this check for the wrong reason. Wait
+  // until the player reports progress after the jump.
+  await sleep(1000);
+  await poll(
+    async () => {
+      const a = (await sw.evaluate(() => globalThis.__lecternState())).session;
+      await sleep(500);
+      const b = (await sw.evaluate(() => globalThis.__lecternState())).session;
+      return a && b && a.chunkIdx === b.chunkIdx && b.inChunkMs > a.inChunkMs;
+    },
+    10_000,
+    'playback progressing after the jump',
+  );
+  const closed = await sw.evaluate(() =>
+    chrome.offscreen.closeDocument().then(
+      async () => (await globalThis.__lecternState()).offscreen === false,
+      (err) => err.message,
+    ),
+  );
+  check('the player is gone once closed (precondition)', closed === true, String(closed));
+  const rebuilt = await poll(
+    () => sw.evaluate(() => globalThis.__lecternState().then((s) => (s.offscreen && s.session ? s.session : null))),
+    15_000,
+    'rebuilt offscreen player',
+  ).catch(() => null);
+  check('a player Chrome closes mid-session is rebuilt', Boolean(rebuilt), `chunk ${rebuilt?.chunkIdx}`);
+  const wordAtRebuild = await wordNow();
+  const readsOn = await poll(
+    async () => {
+      const w = await wordNow();
+      const status = await page.evaluate(
+        () => document.querySelector('[data-lectern]').shadowRoot.querySelector('.status').textContent,
+      );
+      return w && w !== wordAtRebuild && status === 'Reading aloud' ? w : null;
+    },
+    15_000,
+    'highlight moving after the rebuild',
+  ).catch(() => null);
+  check('reading continues after the rebuild', Boolean(readsOn), `"${readsOn}"`);
+
   // — pause, wait past the offscreen 30s shutdown, resume → rehydration
   await page.evaluate(() => document.querySelector('[data-lectern]').shadowRoot.querySelector('.play').click());
   await sleep(1000);

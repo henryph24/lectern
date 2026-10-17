@@ -640,3 +640,54 @@ on-demand injection before any Web Store submission (it fingerprints Lectern use
 **Verification**: unit 293/293; web e2e 14/14; extension e2e 33/33; desktop e2e 8/8 (dev
 electron). Screenshots of paused / loading / playing states checked by eye.
 **Not done**: `npm run dist:mac` not rebuilt, so the packaged app still has the old title bar.
+
+## Round: extension speech interruptions (2026-10-17)
+
+Report: "the speech gets interrupted way too often" in the Chrome extension. Settings in the
+extension storage: Supertonic M1 at 2×. Machine load average 6–25 during the round (screen
+recorder at 90% CPU, busy Chrome tabs).
+
+Causes found
+- Throughput: Supertonic at 8 steps took 0.8–1.0 s of compute per s of audio inside the
+  engine (0.46–0.63 standalone, one spike 2.45); 2× playback needs under 0.5. The prefetch
+  window drained and every chunk boundary stalled.
+- No recovery: Chrome closes the offscreen player after 30 s without audio, also mid-stall.
+  Nothing rebuilt it, so the page sat on "Synthesizing…" until the user pressed play.
+- CPU loop: both players refetched a failed chunk at once from `finally`. A closing document
+  fails every fetch immediately, so the old player looped at 100% CPU (117% measured on the
+  extension process); it never finished closing and `createDocument` for a new player
+  hung until Chrome closed that one too ("Offscreen document closed before fully loading").
+  An engine that is down triggers the same loop.
+- A restarted service worker dropped every player message (`handleOffscreen` never loaded
+  the session), and `loadSession` returned early to concurrent callers.
+
+Changes (user chose "adapt to load" for the quality trade-off)
+- [x] `server/lib/pacer.js`: steps = floor(0.6 / (rate · k) − 0.5) in [2, 8]; k is re-estimated
+      from every synthesis (EWMA 0.3, weighted by clip length). `/api/tts` takes `rate`
+      (0 < rate ≤ 4, default 1); fewer steps are a cache variant, any cached variant is served
+      first, the 8-step key is unchanged.
+- [x] `/api/tts` checks the cache again inside the synthesis slot and hands the audio to the
+      cache before the slot frees, so a queued duplicate (a rebuilt player asking again)
+      never synthesizes twice.
+- [x] Web queue and offscreen player send the current `rate`; both retry a failed chunk after
+      2 s, never at once.
+- [x] SW: `watchPlayer` rebuilds the player when a playing session hears nothing for 5 s and
+      finds no player; the player sends a `waiting` beat every 2 s while a chunk synthesizes;
+      `session.playing` tracks state; `handleOffscreen` awaits a shared `loadSession`.
+
+Measurements (headless probe, unique 40-paragraph page, Supertonic M1 at 2×, 100 s)
+- Old code: 9.3 s frozen in 2 stalls (3.2 s, 6.1 s), then the player closed at 30 s and never
+  came back; reached chunk 3.
+- New code: 1.5 s frozen (one 1.3 s gap at the start), reached chunk 12. The harness closes
+  the player every 30 s because muted audio is never "audible"; each rebuild took ~5 s
+  (10.1 s total), which real audible playback does not trigger.
+- Extension process CPU after a player closes with fetches in flight: 113–117% → 0–5.6%.
+
+Verification: unit 312/312; `npm test` 319 passed, 1 failed (Edge live: synthesis hangs past
+30 s; `edge.js` unchanged, and a direct call still pends after 45 s), 1 skipped; web e2e
+14/14; extension e2e 35/36 (the new rebuild checks fail on the old extension and pass on the
+new one; the failure is the known flaky drag check); desktop e2e 8/8.
+
+Not done: the always-on engine runs from `~/speechify-clone`, which does not have these
+changes; the extension must be reloaded in Chrome; `dist:mac` not rebuilt; one-word chunks
+from flex-item stat cards ("10³ to 10⁴") still cost a synthesis each; Edge TTS hangs.

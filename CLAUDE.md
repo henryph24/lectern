@@ -41,8 +41,13 @@ node scripts/generate-logo.mjs   # brand concepts via Gemini image API (.env key
     CRUD + position), `segment.js` (pure `/api/segment` for the extension — **strict
     index parity**: rejects empty blocks instead of filtering, because callers map
     offsets back to their own block arrays), `tts.js` (cache → semaphore(2) →
-    **per-provider** timeout → retry-once, but **never retry an on-device timeout**),
-    `voices.js`.
+    **per-provider** timeout → retry-once, but **never retry an on-device timeout**;
+    the cache is checked again inside the slot, so a queued duplicate never
+    re-synthesizes), `voices.js`.
+  - `lib/pacer.js` — Supertonic denoising steps (2–8) per request, from the client's
+    playback `rate` and the machine's measured speed, so synthesis stays ahead of the
+    listener. At 2× on a busy M3 Pro 8 steps took 0.8–1.0 s per s of audio (2× needs
+    under 0.5). Fewer steps are a cache variant; the 8-step key is unchanged.
 - **Web client** (`public/js/`, vanilla ES modules): `player.js` dual-`<audio>` A/B swap
   for gapless chunk handoff; `queue.js` prefetch window [cur..cur+3], ≤2 concurrent,
   blob-URL LRU; `highlight.js` rAF + binary search over word timings; `reader.js` lazy
@@ -126,8 +131,15 @@ node scripts/generate-logo.mjs   # brand concepts via Gemini image API (.env key
   (extraction can fail; an `'auto'` click can resolve to a toggle), and an unspent arm is a
   standing authorization the MAIN-world page could later spend on a forged one.
 - Offscreen documents with `AUDIO_PLAYBACK` are closed by Chrome after ~30 s without
-  audio (verified in e2e). Anything stateful must live in the SW session and be
-  rehydratable; the server-side audio cache makes rehydration cheap.
+  audio (verified in e2e), also while a slow chunk synthesizes. Anything stateful must live
+  in the SW session and be rehydratable; the server-side audio cache makes rehydration
+  cheap. The player reports in at least every 2 s (time updates, or a `waiting` beat), and
+  a playing session that hears nothing for 5 s and finds no player rebuilds it
+  (`watchPlayer` in `sw.js`). Both players retry a failed chunk after 2 s, **never at
+  once**: a closing document fails every fetch immediately, and the immediate-retry loop
+  pinned the extension process at 100% CPU, so the old document never closed and no new
+  player could load. An e2e check for the rebuild must wait out in-flight seeks first: a
+  seek that finds no player rehydrates one and passes the check on old code.
 - The extension karaoke clock (`engine.js` `tick()`) extrapolates from the last offscreen
   `time` update, and no audio plays while a chunk synthesizes (a voice switch, a slow next
   chunk). So it freezes on any state other than `playing`, and new audio for the chunk it was

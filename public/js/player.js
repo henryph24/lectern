@@ -48,6 +48,7 @@ export function createPlayer({ doc, reader, els, voice, onError }) {
       chunks,
       provider,
       voice: voiceId,
+      rate: () => rate,
       onReady(idx, entry) {
         if (disposed) return;
         if (idx === cur && boundIdx !== cur) bind(entry);

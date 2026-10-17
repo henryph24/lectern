@@ -7,7 +7,10 @@ import { pcmFloatToMp3 } from '../lib/mp3.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const DEFAULT_VOICE = 'M1';
-const DEFAULT_STEPS = 8; // denoising steps (upstream Node default); higher = better/slower
+// Denoising steps: cost is linear in steps, quality rises with them. 8 is the
+// upstream default; upstream benchmarks run 2. The engine's pacer picks a count
+// in this range per request (lib/pacer.js) so synthesis keeps up with playback.
+export const STEPS = { min: 2, max: 8 };
 const SPEED = 1.0; // neutral — Lectern's player owns the 0.5–3× rate control
 const LANG = 'en'; // voice ids don't bind a language; default to English for v1
 
@@ -86,14 +89,16 @@ async function getStyle(id) {
   return styleCache.get(id);
 }
 
-export async function synthesize({ text, voice = DEFAULT_VOICE }) {
+export async function synthesize({ text, voice = DEFAULT_VOICE, steps = STEPS.max }) {
+  const totalSteps = Math.min(STEPS.max, Math.max(STEPS.min, Math.round(steps)));
   const [tts, style] = await Promise.all([getTts(), getStyle(voice)]);
-  const { wav, duration } = await tts.call(text, LANG, style, DEFAULT_STEPS, SPEED);
+  const { wav, duration } = await tts.call(text, LANG, style, totalSteps, SPEED);
   if (!wav || wav.length === 0) throw new Error('Supertonic produced no audio');
   return {
     audio: pcmFloatToMp3(wav instanceof Float32Array ? wav : Float32Array.from(wav), tts.sampleRate),
     format: 'mp3',
     words: durationToWords(text, duration[0]),
+    durationMs: (wav.length / tts.sampleRate) * 1000, // what the pacer measures against
   };
 }
 

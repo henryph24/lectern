@@ -16,7 +16,10 @@ import * as kokoro from './kokoro.js';
 // on-device requests interleave step by step and both finish late: one at a
 // time delivers the chunk the listener is waiting on about twice as soon
 // (3.6 s vs 7.4 s measured for Supertonic) for the same total throughput.
-// `timeoutMs`/`retryOnTimeout`/`concurrency` are consumed by routes/tts.js.
+// `steps` is the denoising-step range of a diffusion provider; the route paces
+// each request inside it (lib/pacer.js), trading quality for keeping up with
+// the listener's playback rate on a slow or busy machine.
+// `timeoutMs`/`retryOnTimeout`/`concurrency`/`steps` are consumed by routes/tts.js.
 export const providers = {
   edge: {
     synthesize: edge.synthesize,
@@ -44,6 +47,7 @@ export const providers = {
     timeoutMs: 120_000,
     retryOnTimeout: false,
     concurrency: 1,
+    steps: supertonic.STEPS,
   },
   kokoro: {
     synthesize: kokoro.synthesize,

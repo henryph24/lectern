@@ -19,6 +19,16 @@ describe('cacheKey', () => {
   it('is immune to delimiter collisions between fields', () => {
     expect(cacheKey('e', 'v', 'a|b')).not.toBe(cacheKey('e', 'v|a', 'b'));
   });
+
+  it('gives each synthesis variant its own key and leaves the default key unchanged', () => {
+    const base = cacheKey('supertonic', 'M1', 'hello');
+    // entries written before variants existed must still be found
+    expect(cacheKey('supertonic', 'M1', 'hello', null)).toBe(base);
+    expect(cacheKey('supertonic', 'M1', 'hello', { steps: 4 })).not.toBe(base);
+    expect(cacheKey('supertonic', 'M1', 'hello', { steps: 4 })).not.toBe(
+      cacheKey('supertonic', 'M1', 'hello', { steps: 3 }),
+    );
+  });
 });
 
 describe('createCache', () => {

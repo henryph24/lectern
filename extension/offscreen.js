@@ -7,6 +7,16 @@ const API = 'http://127.0.0.1:3000';
 const WINDOW_AHEAD = 3;
 const MAX_CONCURRENT = 2;
 const TIME_INTERVAL_MS = 250;
+// While a chunk synthesizes nothing plays and no time updates go out, so the
+// player reports in at this interval instead. The service worker treats a
+// longer silence as a closed player (see watchPlayer in sw.js).
+const BEAT_MS = 2_000;
+// A failed chunk is asked for again after this long. Retrying at once loops: a
+// request to an engine that is down fails immediately, and so does every
+// request from this document once Chrome starts closing it. That loop pinned
+// the extension process at 100% CPU, so the closing document never finished
+// closing and no new player could load.
+const RETRY_MS = 2_000;
 
 let s = null; // { chunks, provider, voice, rate, idx, wantPlay, entries, inFlight, active, standby, standbyIdx, timeTimer }
 
@@ -49,6 +59,7 @@ function start({ chunks, startChunk = 0, offsetMs = 0, charStart = null, provide
     standbyIdx: -1,
     pending: { offsetMs, charStart },
     bound: false,
+    lastBeat: 0,
     timeTimer: setInterval(emitTime, TIME_INTERVAL_MS),
   };
   applyRate();
@@ -61,7 +72,7 @@ function ensureWindow() {
   const last = Math.min(s.idx + WINDOW_AHEAD, s.chunks.length - 1);
   for (let i = s.idx; i <= last && s.inFlight < MAX_CONCURRENT; i++) {
     const entry = s.entries.get(i);
-    if (entry && entry.status !== 'failed') continue;
+    if (entry && !(entry.status === 'failed' && Date.now() >= entry.retryAt)) continue;
     fetchChunk(i);
   }
 }
@@ -74,7 +85,13 @@ function fetchChunk(idx) {
   fetch(`${API}/api/tts`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider: mySession.provider, voice: mySession.voice, text: mySession.chunks[idx].text }),
+    // the playback rate paces on-device synthesis, so it keeps up with the listener
+    body: JSON.stringify({
+      provider: mySession.provider,
+      voice: mySession.voice,
+      text: mySession.chunks[idx].text,
+      rate: mySession.rate,
+    }),
     signal: entry.abort.signal,
   })
     .then(async (res) => {
@@ -92,6 +109,7 @@ function fetchChunk(idx) {
     .catch((err) => {
       if (s !== mySession) return;
       entry.status = 'failed';
+      entry.retryAt = Date.now() + RETRY_MS;
       if (idx === s.idx) {
         s.wantPlay = false;
         emitState('error', err.message);
@@ -101,6 +119,7 @@ function fetchChunk(idx) {
       if (s !== mySession) return;
       mySession.inFlight--;
       ensureWindow();
+      if (entry.status === 'failed') setTimeout(ensureWindow, RETRY_MS);
     });
 }
 
@@ -201,7 +220,17 @@ function applyRate() {
 }
 
 function emitTime() {
-  if (!s || !s.bound) return;
+  if (!s) return;
+  if (!s.bound) {
+    // Nothing plays while the chunk synthesizes. Tell the service worker the
+    // player is still here (which also keeps it awake), so it can tell this
+    // wait from a player Chrome closed.
+    if (s.wantPlay && Date.now() - s.lastBeat >= BEAT_MS) {
+      s.lastBeat = Date.now();
+      send({ type: 'waiting' });
+    }
+    return;
+  }
   send({
     type: 'time',
     idx: s.idx,

@@ -6,7 +6,7 @@ const API = 'http://127.0.0.1:3000';
 const DEFAULTS_KEY = 'lectern.defaults';
 
 let session = null;
-let sessionLoaded = false;
+let sessionLoad = null;
 let lastPersist = 0;
 // Tabs the user explicitly activated via a trusted entry point (toolbar click,
 // context menu, keyboard command). Only these may start a reading session —
@@ -36,11 +36,14 @@ function consumeArm(tabId, nonce) {
   return Boolean(arm) && arm.expiry > Date.now() && typeof nonce === 'string' && arm.nonce === nonce;
 }
 
-async function loadSession() {
-  if (sessionLoaded) return;
-  sessionLoaded = true;
-  const stored = await chrome.storage.session.get('session');
-  if (stored.session) session = stored.session;
+// One read per service worker life, shared by every caller: messages arrive in
+// bursts after a restart, and a caller that returned before the read finished
+// would see no session and drop its message.
+function loadSession() {
+  sessionLoad ??= chrome.storage.session.get('session').then((stored) => {
+    if (stored.session && !session) session = stored.session;
+  });
+  return sessionLoad;
 }
 
 function persistSession(force = false) {
@@ -470,11 +473,15 @@ async function handleUp(tabId, msg, sender) {
   }
 }
 
-function handleOffscreen(msg, sender) {
+async function handleOffscreen(msg, sender) {
   // Only our own offscreen document; nothing else in the extension speaks this
   // protocol, and a content script must never be able to.
   if (sender?.url !== chrome.runtime.getURL('offscreen.html')) return;
+  // A service worker that Chrome restarted mid-session starts with no session
+  // in memory; without this every update to the page would be dropped.
+  await loadSession();
   if (!session) return;
+  watchPlayer();
   switch (msg.type) {
     case 'time':
       session.chunkIdx = msg.idx;
@@ -489,8 +496,43 @@ function handleOffscreen(msg, sender) {
       sendDown({ type: 'chunk', idx: msg.idx, words: msg.words });
       break;
     case 'state':
+      // 'loading' after a chunk ended: the player now waits on the next chunk,
+      // which is where a rebuilt player must start
+      if (msg.state === 'loading' && Number.isInteger(msg.idx) && msg.idx !== session.chunkIdx) {
+        session.chunkIdx = msg.idx;
+        session.inChunkMs = 0;
+      }
+      session.playing = msg.state === 'playing' || msg.state === 'loading';
+      persistSession(true);
       sendDown({ type: 'state', state: msg.state, message: msg.message, rate: msg.rate });
       break;
+    // 'waiting' is the player's beat while a chunk synthesizes: receiving it is the point
+  }
+}
+
+// Chrome closes the offscreen player after 30 s without audio. While the
+// listener is paused that is by design (the next toggle rehydrates). While a
+// slow chunk synthesizes it would end the reading with the page stuck on
+// "Synthesizing…". The player reports in at least every 2 s while it exists
+// (time updates, or a 'waiting' beat), so a playing session that hears nothing
+// for longer and finds no player has lost it: rebuild it at the saved position.
+const PLAYER_SILENCE_MS = 5_000;
+let playerWatch = 0;
+
+function watchPlayer() {
+  clearTimeout(playerWatch);
+  playerWatch = setTimeout(onPlayerSilent, PLAYER_SILENCE_MS);
+}
+
+async function onPlayerSilent() {
+  await loadSession();
+  if (!session?.playing || (await hasOffscreen())) return;
+  try {
+    await rehydrateAndPlay();
+  } catch (err) {
+    session.playing = false;
+    persistSession(true);
+    sendDown({ type: 'error', message: err.message });
   }
 }
 

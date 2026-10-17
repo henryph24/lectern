@@ -59,4 +59,37 @@ describe('createQueue', () => {
     await vi.waitFor(() => expect(onReady).toHaveBeenCalledWith(0, expect.objectContaining({ status: 'ready' })));
     queue.dispose();
   });
+
+  it('waits before it asks again for a chunk that failed, instead of retrying in a loop', async () => {
+    vi.useFakeTimers();
+    try {
+      // an engine that is down fails every request at once; the cap keeps a
+      // regression from looping forever inside the test
+      tts.mockImplementation(() =>
+        tts.mock.calls.length > 50 ? new Promise(() => {}) : Promise.reject(new Error('engine down')),
+      );
+      const queue = createQueue({ chunks, provider: 'edge', voice: 'v' });
+      queue.ensureWindow(0);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(tts).toHaveBeenCalledTimes(4); // each chunk in the window, once
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(tts).toHaveBeenCalledTimes(4);
+      await vi.advanceTimersByTimeAsync(1_500); // past the retry delay
+      expect(tts).toHaveBeenCalledTimes(8);
+      queue.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sends the playback rate current at request time, so the engine can pace its work', async () => {
+    tts.mockResolvedValue({ audioBase64, words: [] });
+    let rate = 1;
+    const queue = createQueue({ chunks, provider: 'supertonic', voice: 'M1', rate: () => rate });
+    queue.ensureWindow(0);
+    rate = 2; // the listener speeds up before the rest of the window is requested
+    await vi.waitFor(() => expect(tts).toHaveBeenCalledTimes(4));
+    expect(tts.mock.calls.map(([, , , options]) => options.rate)).toEqual([1, 1, 2, 2]);
+    queue.dispose();
+  });
 });

@@ -18,7 +18,22 @@ const mocks = vi.hoisted(() => ({
   edgeConcurrency: 2,
   elevenSynthesize: vi.fn(),
   elevenTimeoutMs: 20_000,
+  supertonicAvailable: vi.fn(() => false),
+  supertonicSynthesize: vi.fn(),
+  pacers: [],
 }));
+
+// the real pacer, with each instance kept so a test can see what was fed to it
+vi.mock('../../server/lib/pacer.js', async (importOriginal) => {
+  const real = await importOriginal();
+  return {
+    createPacer: (options) => {
+      const pacer = real.createPacer(options);
+      mocks.pacers.push(pacer);
+      return pacer;
+    },
+  };
+});
 
 vi.mock('../../server/providers/index.js', () => {
   const providers = {
@@ -47,10 +62,12 @@ vi.mock('../../server/providers/index.js', () => {
       },
     },
     supertonic: {
-      synthesize: vi.fn(),
+      synthesize: mocks.supertonicSynthesize,
       voices: vi.fn(() => []),
       isKnownVoice: vi.fn(() => true),
-      available: () => false,
+      available: mocks.supertonicAvailable,
+      concurrency: 1,
+      steps: { min: 2, max: 8 },
     },
     kokoro: {
       synthesize: vi.fn(),
@@ -101,6 +118,9 @@ beforeEach(() => {
   mocks.edgeConcurrency = 2;
   mocks.elevenSynthesize.mockReset();
   mocks.elevenTimeoutMs = 20_000;
+  mocks.supertonicAvailable.mockReset().mockReturnValue(false);
+  mocks.supertonicSynthesize.mockReset();
+  mocks.pacers.length = 0;
 });
 
 const importText = (text, title) =>
@@ -299,6 +319,92 @@ describe('POST /api/tts synthesis queues', () => {
     expect((await firstDone).status).toBe(200);
     await new Promise((r) => setTimeout(r, 30));
     expect(mocks.edgeSynthesize).toHaveBeenCalledTimes(1);
+  });
+
+  it('synthesizes a text once when a second request for it waits in the queue', async () => {
+    mocks.edgeConcurrency = 1;
+    const local = freshApp();
+    let release;
+    mocks.edgeSynthesize.mockImplementationOnce(() => new Promise((r) => { release = () => r(ok()); }));
+    const body = { provider: 'edge', voice: 'v', text: 'Asked for twice.' };
+    const first = request(local).post('/api/tts').send(body).then((r) => r);
+    await vi.waitFor(() => expect(mocks.edgeSynthesize).toHaveBeenCalledTimes(1));
+    const second = request(local).post('/api/tts').send(body).then((r) => r);
+    await new Promise((r) => setTimeout(r, 30)); // queued behind the first
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(b.body.cached).toBe(true);
+    expect(mocks.edgeSynthesize).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('POST /api/tts step pacing (on-device providers)', () => {
+  const words = [{ text: 'Hi', startMs: 0, endMs: 200, charStart: 0, charEnd: 2 }];
+  const ok = () => ({ audio: Buffer.from('AUDIO'), format: 'mp3', words, durationMs: 10_000 });
+  const freshApp = () => createApp({ dataDir });
+  const stepsOfCall = (n) => mocks.supertonicSynthesize.mock.calls[n][0].steps;
+
+  beforeEach(() => {
+    mocks.supertonicAvailable.mockReturnValue(true);
+    mocks.supertonicSynthesize.mockResolvedValue(ok());
+  });
+
+  it('rejects a rate that is not a positive number up to 4', async () => {
+    for (const rate of ['fast', 0, -1, 5, null]) {
+      const res = await request(app).post('/api/tts').send({ provider: 'supertonic', voice: 'M1', text: 'Rate check.', rate });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/rate/);
+    }
+    expect(mocks.supertonicSynthesize).not.toHaveBeenCalled();
+  });
+
+  it('asks a stepped provider for fewer steps at a higher playback rate', async () => {
+    const send = (local, rate, text) =>
+      request(local).post('/api/tts').send({ provider: 'supertonic', voice: 'M1', text, rate });
+    expect((await send(freshApp(), 1, 'Paced at one.')).status).toBe(200);
+    expect((await send(freshApp(), 2, 'Paced at two.')).status).toBe(200);
+    expect(stepsOfCall(0)).toBe(8);
+    expect(stepsOfCall(1)).toBe(4);
+  });
+
+  it('treats a request without a rate as 1x', async () => {
+    const res = await request(freshApp()).post('/api/tts').send({ provider: 'supertonic', voice: 'M1', text: 'No rate given.' });
+    expect(res.status).toBe(200);
+    expect(stepsOfCall(0)).toBe(8);
+  });
+
+  it('feeds every synthesis back into the pacer', async () => {
+    const local = freshApp();
+    await request(local).post('/api/tts').send({ provider: 'supertonic', voice: 'M1', text: 'Measured.', rate: 1 });
+    const pacer = mocks.pacers.at(-1);
+    // the mock answers at once, so the measured cost per ms of audio falls below the default
+    expect(pacer.k).toBeLessThan(0.06);
+  });
+
+  it('never passes steps to a provider without them', async () => {
+    mocks.edgeSynthesize.mockResolvedValue(ok());
+    await request(freshApp()).post('/api/tts').send({ provider: 'edge', voice: 'v', text: 'No steps here.', rate: 2 });
+    expect(mocks.edgeSynthesize).toHaveBeenCalledWith({ text: 'No steps here.', voice: 'v' });
+  });
+
+  it('serves any cached step count before it synthesizes again', async () => {
+    const send = (local, rate, text) =>
+      request(local).post('/api/tts').send({ provider: 'supertonic', voice: 'M1', text, rate });
+    const local = freshApp();
+    // fewer steps first, then the same text at 1x
+    expect((await send(local, 2, 'Cached at four steps.')).body.cached).toBe(false);
+    expect((await send(local, 1, 'Cached at four steps.')).body.cached).toBe(true);
+    // the full-quality entry first, then the same text at 2x
+    expect((await send(local, 1, 'Cached at eight steps.')).body.cached).toBe(false);
+    expect((await send(local, 2, 'Cached at eight steps.')).body.cached).toBe(true);
+    expect(mocks.supertonicSynthesize.mock.calls.map(([args]) => args.steps)).toEqual([4, 8]);
+  });
+
+  it('stores the default step count under the key used before pacing existed', async () => {
+    const { cacheKey } = await import('../../server/lib/cache.js');
+    await request(freshApp()).post('/api/tts').send({ provider: 'supertonic', voice: 'M1', text: 'Legacy key.', rate: 1 });
+    await vi.waitFor(() => access(path.join(dataDir, 'cache', `${cacheKey('supertonic', 'M1', 'Legacy key.')}.mp3`)));
   });
 });
 
